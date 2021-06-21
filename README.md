@@ -1,6 +1,6 @@
 ## Features
 
-- Allows players to ride drones by standing on them
+- Allows players to ride drones as passengers by standing on them
 - Compatible with drones resized by Drone Scale Manager
 
 ## Permissions
@@ -11,7 +11,7 @@
 
 #### How do I get a drone?
 
-As of this writing (May 2021), RC drones are a deployable item named `drone`, but they do not appear naturally in any loot table, nor are they craftable. However, since they are simply an item, you can use plugins to add them to loot tables, kits, GUI shops, etc. Admins can also get them with the command `inventory.give drone 1`, or spawn one in directly with `spawn drone.deployed`.
+As of this writing, RC drones are a deployable item named `drone`, but they do not appear naturally in any loot table, nor are they craftable. However, since they are simply an item, you can use plugins to add them to loot tables, kits, GUI shops, etc. Admins can also get them with the command `inventory.give drone 1`, or spawn one in directly with `spawn drone.deployed`.
 
 #### How do I remote-control a drone?
 

@@ -7,7 +7,7 @@ using VLB;
 namespace Oxide.Plugins
 {
     [Info("Ridable Drones", "WhiteThunder", "1.0.0")]
-    [Description("Allows players to ride RC drones by standing on them.")]
+    [Description("Allows players to ride RC drones as passengers by standing on them.")]
     internal class RidableDrones : CovalencePlugin
     {
         #region Fields
@@ -57,34 +57,38 @@ namespace Oxide.Plugins
         }
 
         // Must hook before the drone is actually scaled, to move the parent trigger to the root entity.
-        // This is done to prevent issues where the player observes the entity they are parented to resize.
+        // This is done to prevent issues where the player observes the entity resizing while parented to it.
         private void OnDroneScaleBegin(Drone drone, BaseEntity rootEntity, float scale, float previousScale)
         {
             if (previousScale == 1)
             {
-                var platform = drone.GetComponent<DronePlatformComponent>();
-                if (platform == null)
+                // Drone is being resized from default size.
+                var dronePlatform = drone.GetComponent<DronePlatformComponent>();
+                if (dronePlatform == null)
                     return;
 
-                // Move parent trigger to root entity.
-                UnityEngine.Object.DestroyImmediate(platform);
+                // Move parent trigger from drone to root entity.
+                UnityEngine.Object.DestroyImmediate(dronePlatform);
                 DronePlatformComponent.AddToRootEntity(drone, rootEntity, scale);
                 return;
             }
 
+            // Drone is not default size.
+            var rootPlatform = rootEntity.GetComponent<DronePlatformComponent>();
+            if (rootPlatform == null)
+                return;
+
             if (scale == 1)
             {
-                var platform = rootEntity.GetComponent<DronePlatformComponent>();
-                if (platform == null)
-                    return;
-
+                // Drone is being resized to default size.
                 // Move parent trigger to drone.
-                UnityEngine.Object.DestroyImmediate(platform);
+                UnityEngine.Object.DestroyImmediate(rootPlatform);
                 drone.Invoke(() => DronePlatformComponent.AddToDrone(drone, scale), 0);
                 return;
             }
 
-            rootEntity.GetOrAddComponent<DronePlatformComponent>().SetScale(scale);
+            // Drone is being resized from a non-default size to a different non-default size.
+            rootPlatform.SetScale(scale);
         }
 
         private bool? OnEntityEnter(TriggerParentEnclosed triggerParent, BasePlayer player)
@@ -99,7 +103,7 @@ namespace Oxide.Plugins
 
             // Don't allow parenting if the drone is sideways or upside-down.
             // This helps avoid issues where an upside-down drone flips the camera around.
-            // Note: There can still be issues when a drone flips when players are already parented.
+            // Note: This does not solve problems for players already parented.
             if (Vector3.Dot(Vector3.up, drone.transform.up) < 0.8f)
                 return false;
 
@@ -190,10 +194,14 @@ namespace Oxide.Plugins
                 }
             }
 
-            private static readonly Vector3 BaseLocalPosition = new Vector3(0, 0.05f, 0);
+            // Scalable vertical offset from the drone where the trigger should be created.
+            private static readonly Vector3 LocalPosition = new Vector3(0, 0.05f, 0);
+
+            // Minimum extents, regardless of scale.
+            // Note: These are based on default drone size, so they aren't the best for baby drones.
             private static readonly Vector3 MinExtents = new Vector3(0.75f, 1.8f, 0.75f);
 
-            public Drone OwnerDrone;
+            public Drone OwnerDrone { get; private set; }
 
             private GameObject _child;
             private BoxCollider _collider;
@@ -202,16 +210,19 @@ namespace Oxide.Plugins
             {
                 var childTransform = _child.transform;
                 childTransform.localScale = new Vector3(scale, 1, scale);
-                childTransform.localPosition = BaseLocalPosition;
+                childTransform.localPosition = LocalPosition;
 
                 if (baseEntity != OwnerDrone && _pluginInstance.DroneScaleManager != null)
                 {
+                    // Position the trigger relative to the drone.
+                    // This accounts for the root entity being offset from the drone, as well as drone scale.
                     var result = _pluginInstance.DroneScaleManager.Call("API_ParentTransform", OwnerDrone, childTransform);
                     if (!(result is bool) || !(bool)result)
                         _pluginInstance.LogError($"Unable to position parent trigger relative to resized drone {OwnerDrone.net.ID}.");
                 }
 
                 // Move the transform upward so it begins at the drone instead of centering on the drone.
+                // This is done after positioning relative to the drone since we want to take into account the scaled position.
                 childTransform.localPosition += new Vector3(0, MinExtents.y / 2, 0);
                 return this;
             }
@@ -237,7 +248,7 @@ namespace Oxide.Plugins
 
                 _collider = _child.gameObject.AddComponent<BoxCollider>();
                 _collider.isTrigger = true;
-                _collider.gameObject.layer = 18;
+                _collider.gameObject.layer = (int)Rust.Layer.Trigger;
 
                 var extents = OwnerDrone.bounds.extents;
                 _collider.size = new Vector3(
