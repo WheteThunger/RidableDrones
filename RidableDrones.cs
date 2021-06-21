@@ -53,7 +53,12 @@ namespace Oxide.Plugins
             if (!IsDroneEligible(drone))
                 return;
 
-            AddOrUpdatePlatform(drone);
+            // Delay to give other plugins a moment to cache the drone id so they can block this.
+            NextTick(() =>
+            {
+                if (drone != null)
+                    AddOrUpdatePlatform(drone);
+            });
         }
 
         // Must hook before the drone is actually scaled, to move the parent trigger to the root entity.
