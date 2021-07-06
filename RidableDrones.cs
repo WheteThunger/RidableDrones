@@ -6,7 +6,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.0.0")]
+    [Info("Ridable Drones", "WhiteThunder", "1.0.1")]
     [Description("Allows players to ride RC drones as passengers by standing on them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -32,7 +32,7 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            DronePlatformComponent.DestroyAll();
+            DroneParentTriggerComponent.DestroyAll();
             _pluginInstance = null;
         }
 
@@ -57,7 +57,7 @@ namespace Oxide.Plugins
             NextTick(() =>
             {
                 if (drone != null)
-                    AddOrUpdatePlatform(drone);
+                    MaybeCreateParentTrigger(drone);
             });
         }
 
@@ -68,41 +68,41 @@ namespace Oxide.Plugins
             if (previousScale == 1)
             {
                 // Drone is being resized from default size.
-                var dronePlatform = drone.GetComponent<DronePlatformComponent>();
-                if (dronePlatform == null)
+                var droneComponent = drone.GetComponent<DroneParentTriggerComponent>();
+                if (droneComponent == null)
                     return;
 
                 // Move parent trigger from drone to root entity.
-                UnityEngine.Object.DestroyImmediate(dronePlatform);
-                DronePlatformComponent.AddToRootEntity(drone, rootEntity, scale);
+                UnityEngine.Object.DestroyImmediate(droneComponent);
+                DroneParentTriggerComponent.AddToRootEntity(drone, rootEntity, scale);
                 return;
             }
 
             // Drone is not default size.
-            var rootPlatform = rootEntity.GetComponent<DronePlatformComponent>();
-            if (rootPlatform == null)
+            var rootComponent = rootEntity.GetComponent<DroneParentTriggerComponent>();
+            if (rootComponent == null)
                 return;
 
             if (scale == 1)
             {
                 // Drone is being resized to default size.
                 // Move parent trigger to drone.
-                UnityEngine.Object.DestroyImmediate(rootPlatform);
-                drone.Invoke(() => DronePlatformComponent.AddToDrone(drone, scale), 0);
+                UnityEngine.Object.DestroyImmediate(rootComponent);
+                drone.Invoke(() => DroneParentTriggerComponent.AddToDrone(drone, scale), 0);
                 return;
             }
 
             // Drone is being resized from a non-default size to a different non-default size.
-            rootPlatform.SetScale(scale);
+            rootComponent.SetScale(scale);
         }
 
         private bool? OnEntityEnter(TriggerParentEnclosed triggerParent, BasePlayer player)
         {
-            var platform = triggerParent.GetComponentInParent<DronePlatformComponent>();
-            if (platform == null)
+            var parentTriggerComponent = triggerParent.GetComponentInParent<DroneParentTriggerComponent>();
+            if (parentTriggerComponent == null)
                 return null;
 
-            var drone = platform.OwnerDrone;
+            var drone = parentTriggerComponent.OwnerDrone;
             if (drone == null)
                 return null;
 
@@ -119,7 +119,7 @@ namespace Oxide.Plugins
 
         #region Helper Methods
 
-        private static bool CreatePlatformWasBlocked(Drone drone)
+        private static bool CreateParentTriggerWasBlocked(Drone drone)
         {
             object hookResult = Interface.CallHook("OnDroneParentTriggerCreate", drone);
             return hookResult is bool && (bool)hookResult == false;
@@ -147,39 +147,52 @@ namespace Oxide.Plugins
         private static bool IsDroneEligible(Drone drone) =>
             !(drone is DeliveryDrone);
 
-        private static bool TryCreatePlatform(Drone drone)
-        {
-            if (CreatePlatformWasBlocked(drone))
-                return false;
-
-            DronePlatformComponent.AddToDroneOrRootEntity(drone, GetDroneScale(drone));
-            Interface.CallHook("OnDroneParentTriggerCreated", drone);
-
-            return true;
-        }
-
-        private void AddOrUpdatePlatform(Drone drone)
+        private void MaybeCreateParentTrigger(Drone drone)
         {
             if (drone.OwnerID == 0 || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionRidable))
                 return;
 
-            TryCreatePlatform(drone);
+            if (CreateParentTriggerWasBlocked(drone))
+                return;
+
+            DroneParentTriggerComponent.AddToDroneOrRootEntity(drone, GetDroneScale(drone));
+            Interface.CallHook("OnDroneParentTriggerCreated", drone);
         }
 
         #endregion
 
         #region Classes
 
-        private class DronePlatformComponent : EntityComponent<BaseEntity>
+        private class TriggerParentEnclosedIgnoreSelf : TriggerParentEnclosed
         {
-            public static DronePlatformComponent AddToDrone(Drone drone, float scale) =>
-                drone.GetOrAddComponent<DronePlatformComponent>().SetDrone(drone, scale);
+            public BaseEntity _thisEntity;
 
-            public static DronePlatformComponent AddToRootEntity(Drone drone, BaseEntity rootEntity, float scale) =>
-                rootEntity.GetOrAddComponent<DronePlatformComponent>().SetDrone(drone, scale);
+            private void Awake()
+            {
+                _thisEntity = gameObject.ToBaseEntity();
+            }
 
-            public static DronePlatformComponent AddToDroneOrRootEntity(Drone drone, float scale) =>
-                GetDroneOrRootEntity(drone).GetOrAddComponent<DronePlatformComponent>().SetDrone(drone, scale);
+            protected override bool ShouldParent(BaseEntity entity)
+            {
+                // This avoids the drone trying to parent itself when using the Targetable Drones plugin.
+                // Targetable Drones uses a child object with the player layer, which the parent trigger is interested in.
+                if (entity == _thisEntity)
+                    return false;
+
+                return base.ShouldParent(entity);
+            }
+        }
+
+        private class DroneParentTriggerComponent : EntityComponent<BaseEntity>
+        {
+            public static DroneParentTriggerComponent AddToDrone(Drone drone, float scale) =>
+                drone.GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
+
+            public static DroneParentTriggerComponent AddToRootEntity(Drone drone, BaseEntity rootEntity, float scale) =>
+                rootEntity.GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
+
+            public static DroneParentTriggerComponent AddToDroneOrRootEntity(Drone drone, float scale) =>
+                GetDroneOrRootEntity(drone).GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
 
             public static void DestroyAll()
             {
@@ -189,13 +202,11 @@ namespace Oxide.Plugins
                     if (drone == null)
                         continue;
 
-                    var droneOrRootEntity = GetDroneOrRootEntity(drone);
-
-                    var platform = droneOrRootEntity.GetComponent<DronePlatformComponent>();
-                    if (platform == null)
+                    var component = GetDroneOrRootEntity(drone).GetComponent<DroneParentTriggerComponent>();
+                    if (component == null)
                         continue;
 
-                    DestroyImmediate(platform);
+                    DestroyImmediate(component);
                 }
             }
 
@@ -209,9 +220,9 @@ namespace Oxide.Plugins
             public Drone OwnerDrone { get; private set; }
 
             private GameObject _child;
-            private BoxCollider _collider;
+            private BoxCollider _triggerCollider;
 
-            public DronePlatformComponent SetScale(float scale)
+            public void SetScale(float scale)
             {
                 var childTransform = _child.transform;
                 childTransform.localScale = new Vector3(scale, 1, scale);
@@ -222,17 +233,17 @@ namespace Oxide.Plugins
                     // Position the trigger relative to the drone.
                     // This accounts for the root entity being offset from the drone, as well as drone scale.
                     var result = _pluginInstance.DroneScaleManager.Call("API_ParentTransform", OwnerDrone, childTransform);
-                    if (!(result is bool) || !(bool)result)
+                    var success = result is bool && (bool)result;
+                    if (!success)
                         _pluginInstance.LogError($"Unable to position parent trigger relative to resized drone {OwnerDrone.net.ID}.");
                 }
 
                 // Move the transform upward so it begins at the drone instead of centering on the drone.
                 // This is done after positioning relative to the drone since we want to take into account the scaled position.
                 childTransform.localPosition += new Vector3(0, MinExtents.y / 2, 0);
-                return this;
             }
 
-            private DronePlatformComponent SetDrone(Drone drone, float scale)
+            private DroneParentTriggerComponent InitForDrone(Drone drone, float scale)
             {
                 OwnerDrone = drone;
                 EnsureParentTrigger(scale);
@@ -251,18 +262,18 @@ namespace Oxide.Plugins
                 // parent trigger collider, causing the drone to ocassionally reduce altitude.
                 _child.GetOrAddComponent<Rigidbody>().isKinematic = true;
 
-                _collider = _child.gameObject.AddComponent<BoxCollider>();
-                _collider.isTrigger = true;
-                _collider.gameObject.layer = (int)Rust.Layer.Trigger;
+                _triggerCollider = _child.gameObject.AddComponent<BoxCollider>();
+                _triggerCollider.isTrigger = true;
+                _triggerCollider.gameObject.layer = (int)Rust.Layer.Trigger;
 
                 var extents = OwnerDrone.bounds.extents;
-                _collider.size = new Vector3(
+                _triggerCollider.size = new Vector3(
                     Math.Max(extents.x, MinExtents.x / scale),
                     Math.Max(extents.y, MinExtents.y),
                     Math.Max(extents.z, MinExtents.z / scale)
                 );
 
-                var triggerParent = _child.AddComponent<TriggerParentEnclosed>();
+                var triggerParent = _child.AddComponent<TriggerParentEnclosedIgnoreSelf>();
                 triggerParent.intersectionMode = TriggerParentEnclosed.TriggerMode.PivotPoint;
                 triggerParent.interestLayers = Rust.Layers.Mask.Player_Server;
             }
