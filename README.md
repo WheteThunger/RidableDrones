@@ -3,6 +3,8 @@
 - Allows players to ride drones as passengers by standing on them
 - Compatible with drones resized by Drone Scale Manager
 
+Note: Another player must pilot the drone from a computer station. Players standing on the drone are simply passengers and can not control the drone.
+
 ## Permissions
 
 - `ridabledrones.ridable` -- Drones deployed by players with this permission will be ridable by anyone.
