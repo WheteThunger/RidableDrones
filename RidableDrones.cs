@@ -1,13 +1,19 @@
-﻿using Oxide.Core;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
+using Oxide.Core;
+using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using VLB;
 
 namespace Oxide.Plugins
 {
     [Info("Ridable Drones", "WhiteThunder", "1.0.1")]
-    [Description("Allows players to ride RC drones as passengers by standing on them.")]
+    [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
         #region Fields
@@ -16,8 +22,25 @@ namespace Oxide.Plugins
         Plugin DroneScaleManager, EntityScaleManager;
 
         private static RidableDrones _pluginInstance;
+        private Configuration _pluginConfig;
 
         private const string PermissionRidable = "ridabledrones.ridable";
+        private const string PermissionSeatDeploy = "ridabledrones.seat.deploy";
+        private const string PermissionSeatDeployFree = "ridabledrones.seat.deploy.free";
+        private const string PermissionSeatAutoDeploy = "ridabledrones.seat.autodeploy";
+        private const string PermissionSeatPilot = "ridabledrones.seat.pilot";
+
+        private const string PilotSeatPrefab = "assets/prefabs/vehicle/seats/miniheliseat.prefab";
+        private const string PassengerSeatPrefab = "assets/bundled/prefabs/static/chair.invisible.static.prefab";
+        private const string VisibleSeatPrefab = "assets/prefabs/vehicle/seats/passengerchair.prefab";
+        private const string ChairDeployEffectPrefab = "assets/prefabs/deployable/chair/effects/chair-deploy.prefab";
+
+        private const int ChairItemId = 1534542921;
+
+        private const BaseEntity.Slot SeatSlot = BaseEntity.Slot.UpperModifier;
+
+        private static readonly Vector3 PassenterSeatLocalPosition = new Vector3(0, 0.081f, 0);
+        private static readonly Vector3 PilotSeatLocalPosition = new Vector3(-0.006f, 0.027f, 0.526f);
 
         #endregion
 
@@ -26,13 +49,26 @@ namespace Oxide.Plugins
         private void Init()
         {
             _pluginInstance = this;
+
             permission.RegisterPermission(PermissionRidable, this);
+            permission.RegisterPermission(PermissionSeatDeploy, this);
+            permission.RegisterPermission(PermissionSeatDeployFree, this);
+            permission.RegisterPermission(PermissionSeatAutoDeploy, this);
+            permission.RegisterPermission(PermissionSeatPilot, this);
+
             Unsubscribe(nameof(OnEntitySpawned));
         }
 
         private void Unload()
         {
             DroneParentTriggerComponent.DestroyAll();
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                DroneController.RemoveFromPlayer(player);
+                DismountHelper.RemoveFromPlayer(player);
+            }
+
             _pluginInstance = null;
         }
 
@@ -41,8 +77,31 @@ namespace Oxide.Plugins
             foreach (var entity in BaseNetworkable.serverEntities)
             {
                 var drone = entity as Drone;
-                if (drone != null)
-                    OnEntitySpawned(drone);
+                if (drone == null || !IsDroneEligible(drone))
+                    continue;
+
+                MaybeCreateParentTrigger(drone);
+                MaybeAddOrRefreshSeats(drone);
+            }
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                BaseMountable currentSeat;
+                var drone = GetMountedDrone(player, out currentSeat);
+                if (drone == null)
+                    continue;
+
+                BaseMountable pilotSeat, passengerSeat;
+                if (!TryGetSeats(drone, out pilotSeat, out passengerSeat))
+                    continue;
+
+                DismountHelper.Mount(player, drone);
+
+                if (!permission.UserHasPermission(player.UserIDString, PermissionSeatPilot))
+                    continue;
+
+                var isPilotSeat = currentSeat == pilotSeat;
+                DroneController.Mount(player, drone, isPilotSeat);
             }
 
             Subscribe(nameof(OnEntitySpawned));
@@ -56,9 +115,156 @@ namespace Oxide.Plugins
             // Delay to give other plugins a moment to cache the drone id so they can block this.
             NextTick(() =>
             {
-                if (drone != null)
-                    MaybeCreateParentTrigger(drone);
+                if (drone == null)
+                    return;
+
+                MaybeCreateParentTrigger(drone);
+                MaybeAutoDeploySeat(drone);
             });
+        }
+
+        private void OnEntityBuilt(Planner planner, GameObject go)
+        {
+            if (planner == null || go == null)
+                return;
+
+            var drone = go.ToBaseEntity() as Drone;
+            if (drone == null)
+                return;
+
+            var player = planner.GetOwnerPlayer();
+            if (player == null)
+                return;
+
+            NextTick(() =>
+            {
+                // Delay this check to allow time for other plugins to deploy an entity to this slot.
+                if (drone == null || player == null || HasIncompabitleAttachment(drone))
+                    return;
+
+                if (permission.UserHasPermission(player.UserIDString, PermissionSeatDeploy)
+                    && !permission.UserHasPermission(player.UserIDString, PermissionSeatAutoDeploy)
+                    && UnityEngine.Random.Range(0, 100) < _pluginConfig.TipChance)
+                {
+                    ChatMessage(player, Lang.TipDeployCommand);
+                }
+            });
+        }
+
+        private bool? OnEntityTakeDamage(BaseChair mountable, HitInfo info)
+        {
+            if (mountable.PrefabName != PassengerSeatPrefab)
+                return null;
+
+            var drone = GetParentDrone(mountable);
+            if (drone == null)
+                return null;
+
+            drone.Hurt(info);
+            HitNotify(drone, info);
+
+            return true;
+        }
+
+        // Allow swapping between between the seating modes
+        private void OnServerCommand(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection == null || arg.cmd.FullName != "vehicle.swapseats")
+                return;
+
+            var player = arg.Player();
+            if (player == null)
+                return;
+
+            BaseMountable currentSeat;
+            var drone = GetMountedDrone(player, out currentSeat);
+            if (drone == null)
+                return;
+
+            // Only players with the pilot permission may switch seats.
+            if (!permission.UserHasPermission(player.UserIDString, PermissionSeatPilot))
+                return;
+
+            BaseMountable pilotSeat, passengerSeat;
+            if (!TryGetSeats(drone, out pilotSeat, out passengerSeat))
+                return;
+
+            var desiredSeat = currentSeat == passengerSeat
+                ? pilotSeat
+                : passengerSeat;
+
+            SwitchToSeat(player, currentSeat, desiredSeat);
+        }
+
+        private void OnEntityMounted(BaseMountable currentSeat, BasePlayer player)
+        {
+            var drone = GetParentDrone(currentSeat);
+            if (drone == null)
+                return;
+
+            BaseMountable pilotSeat, passengerSeat;
+            if (!TryGetSeats(drone, out pilotSeat, out passengerSeat))
+                return;
+
+            DismountHelper.Mount(player, drone);
+
+            // The rest of the logic is only for pilots.
+            if (!permission.UserHasPermission(player.UserIDString, PermissionSeatPilot))
+                return;
+
+            var isPilotSeat = currentSeat == pilotSeat;
+            if (isPilotSeat)
+            {
+                // Since the passenger seat is the mount ingress, prevent it from being mounted while the pilot seat is mounted.
+                passengerSeat.SetFlag(BaseEntity.Flags.Busy, true);
+            }
+            else if (!DroneController.Exists(player))
+            {
+                // The player is mounting the drone fresh (not switching seats), so automatically switch to the pilot seat.
+                SwitchToSeat(player, currentSeat, pilotSeat);
+                return;
+            }
+
+            DroneController.Mount(player, drone, isPilotSeat);
+        }
+
+        private void OnEntityDismounted(BaseMountable previousSeat, BasePlayer player)
+        {
+            var drone = GetParentDrone(previousSeat);
+            if (drone == null)
+                return;
+
+            BaseMountable pilotSeat, passengerSeat;
+            if (!TryGetSeats(drone, out pilotSeat, out passengerSeat))
+                return;
+
+            if (previousSeat == pilotSeat)
+            {
+                // Since the passenger seat is the mount ingress, re-enable it when the pilot seat is dismounted.
+                passengerSeat.SetFlag(BaseEntity.Flags.Busy, false);
+            }
+
+            DismountHelper.Dismount(player, drone);
+            DroneController.Dismount(player, drone);
+        }
+
+        private bool? OnEntityEnter(TriggerParentEnclosed triggerParent, BasePlayer player)
+        {
+            var parentTriggerComponent = triggerParent.GetComponentInParent<DroneParentTriggerComponent>();
+            if (parentTriggerComponent == null)
+                return null;
+
+            var drone = parentTriggerComponent.OwnerDrone;
+            if (drone == null)
+                return null;
+
+            // Don't allow parenting if the drone is sideways or upside-down.
+            // This helps avoid issues where an upside-down drone flips the camera around.
+            // Note: This does not solve problems for players already parented.
+            if (Vector3.Dot(Vector3.up, drone.transform.up) < 0.8f)
+                return false;
+
+            return null;
         }
 
         // Must hook before the drone is actually scaled, to move the parent trigger to the root entity.
@@ -96,23 +302,58 @@ namespace Oxide.Plugins
             rootComponent.SetScale(scale);
         }
 
-        private bool? OnEntityEnter(TriggerParentEnclosed triggerParent, BasePlayer player)
+        #endregion
+
+        #region Commands
+
+        [Command("droneseat")]
+        private void DroneSeatCommand(IPlayer player)
         {
-            var parentTriggerComponent = triggerParent.GetComponentInParent<DroneParentTriggerComponent>();
-            if (parentTriggerComponent == null)
-                return null;
+            if (player.IsServer)
+                return;
 
-            var drone = parentTriggerComponent.OwnerDrone;
-            if (drone == null)
-                return null;
+            if (!player.HasPermission(PermissionSeatDeploy))
+            {
+                ReplyToPlayer(player, Lang.ErrorNoPermission);
+                return;
+            }
 
-            // Don't allow parenting if the drone is sideways or upside-down.
-            // This helps avoid issues where an upside-down drone flips the camera around.
-            // Note: This does not solve problems for players already parented.
-            if (Vector3.Dot(Vector3.up, drone.transform.up) < 0.8f)
-                return false;
+            var basePlayer = player.Object as BasePlayer;
+            var drone = GetLookEntity(basePlayer, 3) as Drone;
+            if (drone == null || !IsDroneEligible(drone))
+            {
+                ReplyToPlayer(player, Lang.ErrorNoDroneFound);
+                return;
+            }
 
-            return null;
+            if (HasSeat(drone))
+            {
+                ReplyToPlayer(player, Lang.ErrorAlreadyHasSeat);
+                return;
+            }
+
+            if (HasIncompabitleAttachment(drone))
+            {
+                ReplyToPlayer(player, Lang.ErrorIncompatibleAttachment);
+                return;
+            }
+
+            var isFree = player.HasPermission(PermissionSeatDeployFree);
+            if (!isFree && basePlayer.inventory.FindItemID(ChairItemId) == null)
+            {
+                ReplyToPlayer(player, Lang.ErrorNoChairItem);
+                return;
+            }
+
+            if (TryDeploySeats(drone, basePlayer) == null)
+            {
+                ReplyToPlayer(player, Lang.ErrorDeployFailed);
+            }
+            else if (!isFree)
+            {
+                basePlayer.inventory.Take(null, ChairItemId, 1);
+                basePlayer.Command("note.inv", ChairItemId, -1);
+            }
         }
 
         #endregion
@@ -122,6 +363,12 @@ namespace Oxide.Plugins
         private static bool CreateParentTriggerWasBlocked(Drone drone)
         {
             object hookResult = Interface.CallHook("OnDroneParentTriggerCreate", drone);
+            return hookResult is bool && (bool)hookResult == false;
+        }
+
+        private static bool DeploySeatWasBlocked(Drone drone, BasePlayer deployer)
+        {
+            object hookResult = Interface.CallHook("OnDroneSeatDeploy", drone, deployer);
             return hookResult is bool && (bool)hookResult == false;
         }
 
@@ -147,6 +394,155 @@ namespace Oxide.Plugins
         private static bool IsDroneEligible(Drone drone) =>
             !(drone is DeliveryDrone);
 
+        private static Drone GetParentDrone(BaseEntity entity) =>
+            entity.GetParentEntity() as Drone;
+
+        private static Drone GetMountedDrone(BasePlayer player, out BaseMountable currentSeat)
+        {
+            currentSeat = player.GetMounted();
+            if (currentSeat == null)
+                return null;
+
+            return currentSeat.PrefabName == PilotSeatPrefab || currentSeat.PrefabName == PassengerSeatPrefab
+                ? GetParentDrone(currentSeat)
+                : null;
+        }
+
+        private static bool HasIncompabitleAttachment(Drone drone) =>
+            drone.GetSlot(SeatSlot) != null;
+
+        private static bool TryGetSeats(Drone drone, out BaseMountable pilotSeat, out BaseMountable passengerSeat, out BaseMountable visibleSeat)
+        {
+            pilotSeat = null;
+            passengerSeat = null;
+            visibleSeat = null;
+
+            foreach (var child in drone.children)
+            {
+                var mountable = child as BaseMountable;
+                if (mountable == null)
+                    continue;
+
+                if (mountable.PrefabName == PilotSeatPrefab)
+                    pilotSeat = mountable;
+
+                if (mountable.PrefabName == PassengerSeatPrefab)
+                    passengerSeat = mountable;
+
+                if (mountable.PrefabName == VisibleSeatPrefab)
+                    visibleSeat = mountable;
+            }
+
+            return pilotSeat != null && passengerSeat != null && visibleSeat != null;
+        }
+
+        private static bool TryGetSeats(Drone drone, out BaseMountable pilotSeat, out BaseMountable passengerSeat)
+        {
+            BaseMountable visibleSeat;
+            return TryGetSeats(drone, out pilotSeat, out passengerSeat, out visibleSeat);
+        }
+
+        private static bool HasSeat(Drone drone)
+        {
+            BaseMountable pilotSeat, passengerSeat;
+            return TryGetSeats(drone, out pilotSeat, out passengerSeat);
+        }
+
+        private static void HitNotify(BaseEntity entity, HitInfo info)
+        {
+            var player = info.Initiator as BasePlayer;
+            if (player == null)
+                return;
+
+            entity.ClientRPCPlayer(null, player, "HitNotify");
+        }
+
+        private static void RemoveProblemComponents(BaseEntity entity)
+        {
+            foreach (var collider in entity.GetComponentsInChildren<MeshCollider>())
+                UnityEngine.Object.DestroyImmediate(collider);
+        }
+
+        private static void SetupSeat(BaseMountable mountable)
+        {
+            mountable.isMobile = true;
+            mountable.EnableSaving(true);
+            RemoveProblemComponents(mountable);
+        }
+
+        private static void SetupAllSeats(BaseMountable pilotSeat, BaseMountable passengerSeat, BaseMountable visibleSeat)
+        {
+            SetupSeat(pilotSeat);
+            SetupSeat(passengerSeat);
+            SetupSeat(visibleSeat);
+
+            pilotSeat.dismountPositions = passengerSeat.dismountPositions;
+
+            // Damage will be processed by the drone.
+            passengerSeat.baseProtection = null;
+        }
+
+        private static BaseEntity GetLookEntity(BasePlayer basePlayer, float maxDistance = 3)
+        {
+            RaycastHit hit;
+            return Physics.Raycast(basePlayer.eyes.HeadRay(), out hit, maxDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+                ? hit.GetEntity()
+                : null;
+        }
+
+        private static void SwitchToSeat(BasePlayer player, BaseMountable currentSeat, BaseMountable desiredSeat)
+        {
+            currentSeat.DismountPlayer(player, lite: true);
+            desiredSeat.MountPlayer(player);
+        }
+
+        private static BaseMountable TryDeploySeats(Drone drone, BasePlayer deployer = null)
+        {
+            if (DeploySeatWasBlocked(drone, deployer))
+                return null;
+
+            // The driver seat is ideal for mouse movement since it locks the player view angles.
+            var pilotSeat = GameManager.server.CreateEntity(PilotSeatPrefab, PilotSeatLocalPosition) as BaseMountable;
+            if (pilotSeat == null)
+                return null;
+
+            pilotSeat.SetParent(drone);
+            pilotSeat.Spawn();
+
+            // The passenger seat shows the "mount" prompt and allows for unlocking view angles.
+            var passengerSeat = GameManager.server.CreateEntity(PassengerSeatPrefab, PassenterSeatLocalPosition) as BaseMountable;
+            if (passengerSeat == null)
+            {
+                pilotSeat.Kill();
+                return null;
+            }
+
+            passengerSeat.SetParent(drone);
+            passengerSeat.Spawn();
+
+            // This chair is visibile, even as the drone moves, but doesn't show a mount prompt.
+            var visibleSeat = GameManager.server.CreateEntity(VisibleSeatPrefab, PassenterSeatLocalPosition) as BaseMountable;
+            if (visibleSeat == null)
+            {
+                pilotSeat.Kill();
+                passengerSeat.Kill();
+                return null;
+            }
+
+            visibleSeat.SetParent(drone);
+            visibleSeat.Spawn();
+
+            SetupAllSeats(pilotSeat, passengerSeat, visibleSeat);
+
+            // This signals to other plugins not to deploy entities here.
+            drone.SetSlot(SeatSlot, passengerSeat);
+
+            Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
+            Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
+
+            return passengerSeat;
+        }
+
         private void MaybeCreateParentTrigger(Drone drone)
         {
             if (drone.OwnerID == 0 || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionRidable))
@@ -159,9 +555,31 @@ namespace Oxide.Plugins
             Interface.CallHook("OnDroneParentTriggerCreated", drone);
         }
 
+        private void MaybeAutoDeploySeat(Drone drone)
+        {
+            if (drone.OwnerID == 0
+                || HasIncompabitleAttachment(drone)
+                || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionSeatAutoDeploy))
+                return;
+
+            TryDeploySeats(drone);
+        }
+
+        private void MaybeAddOrRefreshSeats(Drone drone)
+        {
+            BaseMountable pilotSeat, passengerSeat, visibleSeat;
+            if (!TryGetSeats(drone, out pilotSeat, out passengerSeat, out visibleSeat))
+            {
+                MaybeAutoDeploySeat(drone);
+                return;
+            }
+
+            SetupAllSeats(pilotSeat, passengerSeat, visibleSeat);
+        }
+
         #endregion
 
-        #region Classes
+        #region Parent Trigger
 
         private class TriggerParentEnclosedIgnoreSelf : TriggerParentEnclosed
         {
@@ -283,6 +701,274 @@ namespace Oxide.Plugins
                 if (_child != null)
                     Destroy(_child);
             }
+        }
+
+        #endregion
+
+        #region DroneController
+
+        private class DismountHelper : EntityComponent<BasePlayer>
+        {
+            public static void Mount(BasePlayer player, Drone drone) =>
+                player.GetOrAddComponent<DismountHelper>().OnMount(drone);
+
+            public static void Dismount(BasePlayer player, Drone drone) =>
+                player.GetComponent<DismountHelper>()?.OnDismount();
+
+            public static void RemoveFromPlayer(BasePlayer player) =>
+                DestroyImmediate(player.GetComponent<DismountHelper>());
+
+            private Drone _drone;
+
+            private void DelayedDestroy() => DestroyImmediate(this);
+
+            private void OnMount(Drone drone)
+            {
+                // If they were swapping seats, cancel destroying this component.
+                CancelInvoke(DelayedDestroy);
+
+                _drone = drone;
+            }
+
+            // Don't destroy the component immediately, in case the player is swapping seats.
+            private void OnDismount() => Invoke(DelayedDestroy, 0);
+
+            private void Update()
+            {
+                var mountable = baseEntity.GetMounted();
+                if (mountable == null)
+                {
+                    OnDismount();
+                    return;
+                }
+
+                var input = baseEntity.serverInput;
+                if (!input.WasJustPressed(BUTTON.JUMP))
+                    return;
+
+                if (mountable.HasValidDismountPosition(baseEntity))
+                    return;
+
+                var droneTransform = _drone.transform;
+                if (Vector3.Dot(Vector3.up, droneTransform.up) > 0.1f)
+                    return;
+
+                // Player failed to dismount, and drone is at a bad angle, flip it upright.
+                droneTransform.rotation = Quaternion.identity;
+            }
+        }
+
+        private class DroneController : EntityComponent<BasePlayer>
+        {
+            public static bool Exists(BasePlayer player) =>
+                player.GetComponent<DroneController>() != null;
+
+            public static void Mount(BasePlayer player, Drone drone, bool isPilotSeat) =>
+                player.GetOrAddComponent<DroneController>().OnMount(drone, isPilotSeat);
+
+            public static void Dismount(BasePlayer player, Drone drone) =>
+                player.GetComponent<DroneController>()?.OnDismount();
+
+            public static void RemoveFromPlayer(BasePlayer player) =>
+                DestroyImmediate(player.GetComponent<DroneController>());
+
+            private Drone _drone;
+            private bool _isPilotSeat;
+
+            private void DelayedDestroy() => DestroyImmediate(this);
+
+            private void OnMount(Drone drone, bool isPilotSeat)
+            {
+                // If they were swapping seats, cancel destroying this component.
+                CancelInvoke(DelayedDestroy);
+
+                _drone = drone;
+                _isPilotSeat = isPilotSeat;
+                drone.InitializeControl(baseEntity);
+                Interface.CallHook("OnDroneControlStarted", drone, baseEntity);
+            }
+
+            // Don't destroy the component immediately, in case the player is swapping seats.
+            private void OnDismount() => Invoke(DelayedDestroy, 0);
+
+            private void Update()
+            {
+                if (_drone == null || _drone.IsDestroyed)
+                {
+                    DestroyImmediate(this);
+                    return;
+                }
+
+                _drone.UserInput(baseEntity.serverInput, baseEntity);
+            }
+
+            private void OnDestroy()
+            {
+                if (_drone != null && !_drone.IsDestroyed)
+                {
+                    _drone.StopControl();
+                    Interface.CallHook("OnDroneControlEnded", _drone, baseEntity);
+                }
+            }
+        }
+
+        #endregion
+
+        #region Configuration
+
+        private class Configuration : SerializableConfiguration
+        {
+            [JsonProperty("TipChance")]
+            public int TipChance = 25;
+        }
+
+        private Configuration GetDefaultConfig() => new Configuration();
+
+        #endregion
+
+        #region Configuration Boilerplate
+
+        private class SerializableConfiguration
+        {
+            public string ToJson() => JsonConvert.SerializeObject(this);
+
+            public Dictionary<string, object> ToDictionary() => JsonHelper.Deserialize(ToJson()) as Dictionary<string, object>;
+        }
+
+        private static class JsonHelper
+        {
+            public static object Deserialize(string json) => ToObject(JToken.Parse(json));
+
+            private static object ToObject(JToken token)
+            {
+                switch (token.Type)
+                {
+                    case JTokenType.Object:
+                        return token.Children<JProperty>()
+                                    .ToDictionary(prop => prop.Name,
+                                                  prop => ToObject(prop.Value));
+
+                    case JTokenType.Array:
+                        return token.Select(ToObject).ToList();
+
+                    default:
+                        return ((JValue)token).Value;
+                }
+            }
+        }
+
+        private bool MaybeUpdateConfig(SerializableConfiguration config)
+        {
+            var currentWithDefaults = config.ToDictionary();
+            var currentRaw = Config.ToDictionary(x => x.Key, x => x.Value);
+            return MaybeUpdateConfigDict(currentWithDefaults, currentRaw);
+        }
+
+        private bool MaybeUpdateConfigDict(Dictionary<string, object> currentWithDefaults, Dictionary<string, object> currentRaw)
+        {
+            bool changed = false;
+
+            foreach (var key in currentWithDefaults.Keys)
+            {
+                object currentRawValue;
+                if (currentRaw.TryGetValue(key, out currentRawValue))
+                {
+                    var defaultDictValue = currentWithDefaults[key] as Dictionary<string, object>;
+                    var currentDictValue = currentRawValue as Dictionary<string, object>;
+
+                    if (defaultDictValue != null)
+                    {
+                        if (currentDictValue == null)
+                        {
+                            currentRaw[key] = currentWithDefaults[key];
+                            changed = true;
+                        }
+                        else if (MaybeUpdateConfigDict(defaultDictValue, currentDictValue))
+                            changed = true;
+                    }
+                }
+                else
+                {
+                    currentRaw[key] = currentWithDefaults[key];
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        protected override void LoadDefaultConfig() => _pluginConfig = GetDefaultConfig();
+
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            try
+            {
+                _pluginConfig = Config.ReadObject<Configuration>();
+                if (_pluginConfig == null)
+                {
+                    throw new JsonException();
+                }
+
+                if (MaybeUpdateConfig(_pluginConfig))
+                {
+                    LogWarning("Configuration appears to be outdated; updating and saving");
+                    SaveConfig();
+                }
+            }
+            catch (Exception e)
+            {
+                LogError(e.Message);
+                LogWarning($"Configuration file {Name}.json is invalid; using defaults");
+                LoadDefaultConfig();
+            }
+        }
+
+        protected override void SaveConfig()
+        {
+            Log($"Configuration changes saved to {Name}.json");
+            Config.WriteObject(_pluginConfig, true);
+        }
+
+        #endregion
+
+        #region Localization
+
+        private void ReplyToPlayer(IPlayer player, string messageName, params object[] args) =>
+            player.Reply(string.Format(GetMessage(player.Id, messageName), args));
+
+        private void ChatMessage(BasePlayer player, string messageName, params object[] args) =>
+            player.ChatMessage(string.Format(GetMessage(player.UserIDString, messageName), args));
+
+        private string GetMessage(string playerId, string messageName, params object[] args)
+        {
+            var message = lang.GetMessage(messageName, this, playerId);
+            return args.Length > 0 ? string.Format(message, args) : message;
+        }
+
+        private class Lang
+        {
+            public const string TipDeployCommand = "Tip.DeployCommand";
+            public const string ErrorNoPermission = "Error.NoPermission";
+            public const string ErrorNoDroneFound = "Error.NoDroneFound";
+            public const string ErrorNoChairItem = "Error.NoChairItem";
+            public const string ErrorAlreadyHasSeat = "Error.AlreadyHasChair";
+            public const string ErrorIncompatibleAttachment = "Error.IncompatibleAttachment";
+            public const string ErrorDeployFailed = "Error.DeployFailed";
+        }
+
+        protected override void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                [Lang.TipDeployCommand] = "Tip: Look at the drone and run <color=yellow>/droneseat</color> to deploy a seat.",
+                [Lang.ErrorNoPermission] = "You don't have permission to do that.",
+                [Lang.ErrorNoDroneFound] = "Error: No drone found.",
+                [Lang.ErrorNoChairItem] = "Error: You need a chair to do that.",
+                [Lang.ErrorAlreadyHasSeat] = "Error: That drone already has a seat.",
+                [Lang.ErrorIncompatibleAttachment] = "Error: That drone has an incompatible attachment.",
+                [Lang.ErrorDeployFailed] = "Error: Failed to deploy seat.",
+            }, this, "en");
         }
 
         #endregion
