@@ -19,7 +19,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        Plugin DroneScaleManager, EntityScaleManager;
+        Plugin DroneScaleManager, DroneSettings, EntityScaleManager;
 
         private static RidableDrones _pluginInstance;
         private Configuration _pluginConfig;
@@ -320,6 +320,12 @@ namespace Oxide.Plugins
             rootComponent.SetScale(scale);
         }
 
+        // This hook is exposed by plugin: Drone Settings (DroneSettings).
+        private string OnDroneTypeDetermine(Drone drone)
+        {
+            return HasSeat(drone) ? Name : null;
+        }
+
         #endregion
 
         #region Commands
@@ -388,6 +394,11 @@ namespace Oxide.Plugins
         {
             object hookResult = Interface.CallHook("OnDroneSeatDeploy", drone, deployer);
             return hookResult is bool && (bool)hookResult == false;
+        }
+
+        private void RefreshDronSettingsProfile(Drone drone)
+        {
+            DroneSettings?.Call("API_RefreshDroneProfile", drone);
         }
 
         private static float GetDroneScale(Drone drone)
@@ -557,6 +568,7 @@ namespace Oxide.Plugins
 
             Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
             Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
+            _pluginInstance.RefreshDronSettingsProfile(drone);
             _pluginInstance._mountableDronesTracker.AddDrone(drone);
 
             return passengerSeat;
@@ -594,6 +606,7 @@ namespace Oxide.Plugins
             }
 
             SetupAllSeats(pilotSeat, passengerSeat, visibleSeat);
+            RefreshDronSettingsProfile(drone);
             _mountableDronesTracker.AddDrone(drone);
         }
 
