@@ -12,7 +12,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.0.1")]
+    [Info("Ridable Drones", "WhiteThunder", "1.1.0")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
