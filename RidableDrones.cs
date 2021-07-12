@@ -890,7 +890,17 @@ namespace Oxide.Plugins
 
             public static void Mount(BasePlayer player, Drone drone, bool isPilotSeat)
             {
-                player.GetOrAddComponent<DroneController>().OnMount(drone, isPilotSeat);
+                var component = player.GetComponent<DroneController>();
+                var alreadyExists = component != null;
+
+                if (!alreadyExists)
+                    component = player.gameObject.AddComponent<DroneController>();
+
+                component.OnMount(drone, isPilotSeat);
+
+                if (!alreadyExists)
+                    Interface.CallHook("OnDroneControlStarted", drone, player);
+
                 _pluginInstance._mountedDroneTracker.AddDrone(drone);
             }
 
@@ -916,7 +926,6 @@ namespace Oxide.Plugins
                 _drone = drone;
                 _isPilotSeat = isPilotSeat;
                 drone.InitializeControl(baseEntity);
-                Interface.CallHook("OnDroneControlStarted", drone, baseEntity);
             }
 
             // Don't destroy the component immediately, in case the player is swapping seats.
