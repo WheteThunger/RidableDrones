@@ -72,7 +72,15 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            DroneParentTriggerComponent.DestroyAll();
+            foreach (var entity in BaseNetworkable.serverEntities)
+            {
+                var drone = entity as Drone;
+                if (drone == null)
+                    continue;
+
+                DroneParentTriggerComponent.RemoveFromDrone(drone);
+                SeatCollider.RemoveFromDrone(drone);
+            }
 
             foreach (var player in BasePlayer.activePlayerList)
             {
@@ -514,7 +522,7 @@ namespace Oxide.Plugins
             RemoveProblemComponents(mountable);
         }
 
-        private static void SetupAllSeats(BaseMountable pilotSeat, BaseMountable passengerSeat, BaseMountable visibleSeat)
+        private static void SetupAllSeats(Drone drone, BaseMountable pilotSeat, BaseMountable passengerSeat, BaseMountable visibleSeat)
         {
             SetupSeat(pilotSeat);
             SetupSeat(passengerSeat);
@@ -524,6 +532,37 @@ namespace Oxide.Plugins
 
             // Damage will be processed by the drone.
             passengerSeat.baseProtection = null;
+
+            SeatCollider.AddToDrone(drone);
+        }
+
+        private class SeatCollider : EntityComponent<Drone>
+        {
+            public static void AddToDrone(Drone drone) =>
+                drone.GetOrAddComponent<SeatCollider>();
+
+            public static void RemoveFromDrone(Drone drone) =>
+                DestroyImmediate(drone.GetComponent<SeatCollider>());
+
+            private const float ColliderHeight = 1.5f;
+
+            private GameObject _child;
+
+            private void Awake()
+            {
+                var centerOfMass = baseEntity.body.centerOfMass;
+
+                _child = gameObject.CreateChild();
+                _child.transform.localPosition = new Vector3(0, ColliderHeight / 2, 0);
+
+                var collider = _child.AddComponent<BoxCollider>();
+                var droneExtents = baseEntity.bounds.extents;
+                collider.size = new Vector3(droneExtents.x, ColliderHeight, droneExtents.z);
+
+                baseEntity.body.centerOfMass = centerOfMass;
+            }
+
+            private void OnDestroy() => Destroy(_child);
         }
 
         private static BaseEntity GetLookEntity(BasePlayer basePlayer, float maxDistance = 3)
@@ -576,7 +615,7 @@ namespace Oxide.Plugins
             visibleSeat.SetParent(drone);
             visibleSeat.Spawn();
 
-            SetupAllSeats(pilotSeat, passengerSeat, visibleSeat);
+            SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
 
             // This signals to other plugins not to deploy entities here.
             drone.SetSlot(SeatSlot, passengerSeat);
@@ -620,7 +659,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            SetupAllSeats(pilotSeat, passengerSeat, visibleSeat);
+            SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
             RefreshDronSettingsProfile(drone);
             _mountableDronesTracker.AddDrone(drone);
         }
@@ -737,21 +776,8 @@ namespace Oxide.Plugins
                 _pluginInstance._ridableDronesTracker.AddDrone(drone);
             }
 
-            public static void DestroyAll()
-            {
-                foreach (var entity in BaseNetworkable.serverEntities)
-                {
-                    var drone = entity as Drone;
-                    if (drone == null)
-                        continue;
-
-                    var component = GetDroneOrRootEntity(drone).GetComponent<DroneParentTriggerComponent>();
-                    if (component == null)
-                        continue;
-
-                    DestroyImmediate(component);
-                }
-            }
+            public static void RemoveFromDrone(Drone drone) =>
+                DestroyImmediate(GetDroneOrRootEntity(drone).GetComponent<DroneParentTriggerComponent>());
 
             // Scalable vertical offset from the drone where the trigger should be created.
             private static readonly Vector3 LocalPosition = new Vector3(0, 0.05f, 0);
