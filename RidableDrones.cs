@@ -285,6 +285,15 @@ namespace Oxide.Plugins
             return null;
         }
 
+        private void OnPlayerDismountFailed(BasePlayer player, BaseMountable mountable)
+        {
+            var drone = GetMountedDrone(player);
+            if (drone == null)
+                return;
+
+            drone.transform.rotation = Quaternion.identity;
+        }
+
         // Must hook before the drone is actually scaled, to move the parent trigger to the root entity.
         // This is done to prevent issues where the player observes the entity resizing while parented to it.
         private void OnDroneScaleBegin(Drone drone, BaseEntity rootEntity, float scale, float previousScale)
@@ -435,6 +444,12 @@ namespace Oxide.Plugins
             return currentSeat.PrefabName == PilotSeatPrefab || currentSeat.PrefabName == PassengerSeatPrefab
                 ? GetParentDrone(currentSeat)
                 : null;
+        }
+
+        private static Drone GetMountedDrone(BasePlayer player)
+        {
+            BaseMountable currentSeat;
+            return GetMountedDrone(player, out currentSeat);
         }
 
         private static bool HasIncompabitleAttachment(Drone drone) =>
