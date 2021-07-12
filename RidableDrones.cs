@@ -939,6 +939,10 @@ namespace Oxide.Plugins
                     return;
                 }
 
+                // Optimization: Skip if there was no user input this frame.
+                if (baseEntity.lastTickTime < Time.time)
+                    return;
+
                 _drone.UserInput(baseEntity.serverInput, baseEntity);
             }
 
