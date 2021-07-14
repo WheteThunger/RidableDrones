@@ -309,7 +309,8 @@ namespace Oxide.Plugins
             if (drone == null)
                 return;
 
-            drone.transform.rotation = Quaternion.identity;
+            var droneTransform = drone.transform;
+            droneTransform.rotation = Quaternion.Euler(0, droneTransform.rotation.eulerAngles.y, 0);
         }
 
         // Must hook before the drone is actually scaled, to move the parent trigger to the root entity.
@@ -882,7 +883,7 @@ namespace Oxide.Plugins
                     return;
 
                 // Player failed to dismount, and drone is at a bad angle, flip it upright.
-                droneTransform.rotation = Quaternion.identity;
+                droneTransform.rotation = Quaternion.Euler(0, droneTransform.rotation.eulerAngles.y, 0);
             }
         }
 
