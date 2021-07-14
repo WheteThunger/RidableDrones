@@ -553,6 +553,8 @@ namespace Oxide.Plugins
                 var centerOfMass = baseEntity.body.centerOfMass;
 
                 _child = gameObject.CreateChild();
+                // Layers that seem to work as desired (no client-side collider): 9, 12, 15, 20, 22, 26.
+                _child.gameObject.layer = (int)Rust.Layer.Vehicle_World;
                 _child.transform.localPosition = new Vector3(0, ColliderHeight / 2, 0);
 
                 var collider = _child.AddComponent<BoxCollider>();
