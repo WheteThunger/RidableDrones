@@ -42,9 +42,22 @@ namespace Oxide.Plugins
         private static readonly Vector3 PassenterSeatLocalPosition = new Vector3(0, 0.081f, 0);
         private static readonly Vector3 PilotSeatLocalPosition = new Vector3(-0.006f, 0.027f, 0.526f);
 
-        private RidableDroneTracker _ridableDronesTracker = new RidableDroneTracker();
-        private MountableDroneTracker _mountableDronesTracker = new MountableDroneTracker();
-        private MountedDroneTracker _mountedDroneTracker = new MountedDroneTracker();
+        // Subscribe to these hooks while there are drones with parent triggers.
+        private DynamicHookSubscriber<uint> _ridableDronesTracker = new DynamicHookSubscriber<uint>(
+            nameof(OnEntityEnter)
+        );
+
+        // Subscribe to these hooks while there are drones with seats on them.
+        private DynamicHookSubscriber<uint> _mountableDronesTracker = new DynamicHookSubscriber<uint>(
+            nameof(OnEntityTakeDamage),
+            nameof(OnEntityMounted),
+            nameof(OnEntityDismounted)
+        );
+
+        // Subscribe to these hooks while there are mounted drones.
+        private DynamicHookSubscriber<uint> _mountedDronesTracker = new DynamicHookSubscriber<uint>(
+            nameof(OnServerCommand)
+        );
 
         #endregion
 
@@ -62,12 +75,9 @@ namespace Oxide.Plugins
 
             Unsubscribe(nameof(OnEntitySpawned));
 
-            // These will be dynamically hooked to improve performance.
-            Unsubscribe(nameof(OnEntityTakeDamage));
-            Unsubscribe(nameof(OnServerCommand));
-            Unsubscribe(nameof(OnEntityMounted));
-            Unsubscribe(nameof(OnEntityDismounted));
-            Unsubscribe(nameof(OnEntityEnter));
+            _ridableDronesTracker.UnsubscribeAll();
+            _mountableDronesTracker.UnsubscribeAll();
+            _mountedDronesTracker.UnsubscribeAll();
         }
 
         private void Unload()
@@ -144,9 +154,9 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(Drone drone)
         {
-            _ridableDronesTracker.RemoveDrone(drone);
-            _mountableDronesTracker.RemoveDrone(drone);
-            _mountedDroneTracker.RemoveDrone(drone);
+            _ridableDronesTracker.Remove(drone.net.ID);
+            _mountableDronesTracker.Remove(drone.net.ID);
+            _mountedDronesTracker.Remove(drone.net.ID);
         }
 
         private void OnEntityBuilt(Planner planner, GameObject go)
@@ -625,7 +635,7 @@ namespace Oxide.Plugins
             Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
             Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
             _pluginInstance.RefreshDronSettingsProfile(drone);
-            _pluginInstance._mountableDronesTracker.AddDrone(drone);
+            _pluginInstance._mountableDronesTracker.Add(drone.net.ID);
 
             return passengerSeat;
         }
@@ -663,80 +673,45 @@ namespace Oxide.Plugins
 
             SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
             RefreshDronSettingsProfile(drone);
-            _mountableDronesTracker.AddDrone(drone);
+            _mountableDronesTracker.Add(drone.net.ID);
         }
 
         #endregion
 
-        #region Drone Trackers
+        #region Dynamic Hook Subscriptions
 
-        // Tracks drones that have parent triggers.
-        private class RidableDroneTracker
+        private class DynamicHookSubscriber<T>
         {
-            private HashSet<Drone> _ridableDrones = new HashSet<Drone>();
+            private HashSet<T> _list = new HashSet<T>();
+            private string[] _hookNames;
 
-            public void AddDrone(Drone drone)
+            public DynamicHookSubscriber(params string[] hookNames)
             {
-                if (_ridableDrones.Add(drone) && _ridableDrones.Count == 1)
-                {
-                    _pluginInstance.Subscribe(nameof(OnEntityEnter));
-                }
+                _hookNames = hookNames;
             }
 
-            public void RemoveDrone(Drone drone)
+            public void Add(T item)
             {
-                if (_ridableDrones.Remove(drone) && _ridableDrones.Count == 0)
-                {
-                    _pluginInstance.Unsubscribe(nameof(OnEntityEnter));
-                }
-            }
-        }
-
-        // Tracks drones that have seats.
-        private class MountableDroneTracker
-        {
-            private HashSet<Drone> _mountableDrones = new HashSet<Drone>();
-
-            public void AddDrone(Drone drone)
-            {
-                if (_mountableDrones.Add(drone) && _mountableDrones.Count == 1)
-                {
-                    _pluginInstance.Subscribe(nameof(OnEntityTakeDamage));
-                    _pluginInstance.Subscribe(nameof(OnEntityMounted));
-                    _pluginInstance.Subscribe(nameof(OnEntityDismounted));
-                }
+                if (_list.Add(item) && _list.Count == 1)
+                    SubscribeAll();
             }
 
-            public void RemoveDrone(Drone drone)
+            public void Remove(T item)
             {
-                if (_mountableDrones.Remove(drone) && _mountableDrones.Count == 0)
-                {
-                    _pluginInstance.Unsubscribe(nameof(OnEntityTakeDamage));
-                    _pluginInstance.Unsubscribe(nameof(OnEntityMounted));
-                    _pluginInstance.Unsubscribe(nameof(OnEntityDismounted));
-                }
-            }
-        }
-
-        // Tracks drones that have a pilot-eligible player in them.
-        private class MountedDroneTracker
-        {
-            private HashSet<Drone> _mountedDrones = new HashSet<Drone>();
-
-            public void AddDrone(Drone drone)
-            {
-                if (_mountedDrones.Add(drone) && _mountedDrones.Count == 1)
-                {
-                    _pluginInstance.Subscribe(nameof(OnServerCommand));
-                }
+                if (_list.Remove(item) && _list.Count == 0)
+                    UnsubscribeAll();
             }
 
-            public void RemoveDrone(Drone drone)
+            public void SubscribeAll()
             {
-                if (_mountedDrones.Remove(drone) && _mountedDrones.Count == 0)
-                {
-                    _pluginInstance.Unsubscribe(nameof(OnServerCommand));
-                }
+                foreach (var hookName in _hookNames)
+                    _pluginInstance.Subscribe(hookName);
+            }
+
+            public void UnsubscribeAll()
+            {
+                foreach (var hookName in _hookNames)
+                    _pluginInstance.Unsubscribe(hookName);
             }
         }
 
@@ -775,7 +750,7 @@ namespace Oxide.Plugins
             public static void AddToDroneOrRootEntity(Drone drone, float scale)
             {
                 GetDroneOrRootEntity(drone).GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
-                _pluginInstance._ridableDronesTracker.AddDrone(drone);
+                _pluginInstance._ridableDronesTracker.Add(drone.net.ID);
             }
 
             public static void RemoveFromDrone(Drone drone) =>
@@ -929,13 +904,13 @@ namespace Oxide.Plugins
                 if (!alreadyExists)
                     Interface.CallHook("OnDroneControlStarted", drone, player);
 
-                _pluginInstance._mountedDroneTracker.AddDrone(drone);
+                _pluginInstance._mountedDronesTracker.Add(drone.net.ID);
             }
 
             public static void Dismount(BasePlayer player, Drone drone)
             {
                 player.GetComponent<DroneController>()?.OnDismount();
-                _pluginInstance._mountedDroneTracker.RemoveDrone(drone);
+                _pluginInstance._mountedDronesTracker.Remove(drone.net.ID);
             }
 
             public static void RemoveFromPlayer(BasePlayer player) =>
