@@ -127,3 +127,23 @@ void OnDroneSeatDeployed(Drone drone, BasePlayer optionalDeployer)
 
 - Called after a seat has been deployed onto a drone
 - No return behavior
+
+#### OnDroneControlStarted
+
+```csharp
+void OnDroneControlStarted(Drone drone, BasePlayer pilot)
+```
+
+- Called when a player mounts a drone seat while having the pilot permission
+- Also called when a pilot switches seating modes
+- No return behavior
+
+#### OnDroneControlEnded
+
+```csharp
+void OnDroneControlEnded(Drone drone, BasePlayer pilot)
+```
+
+- Called after a pilot has dismounted a drone seat
+- Also called when a pilot switches seating modes
+- No return behavior
