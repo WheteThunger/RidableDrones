@@ -12,7 +12,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.1.1")]
+    [Info("Ridable Drones", "WhiteThunder", "1.2.0")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -948,6 +948,15 @@ namespace Oxide.Plugins
                     return;
 
                 _drone.UserInput(baseEntity.serverInput, baseEntity);
+
+                if (!_isPilotSeat)
+                {
+                    // In hybrid mode, move relative to the direction the player is facing, instead of relative to the direction the drone is facing.
+                    var worldDirection = _drone.transform.InverseTransformVector(_drone.currentInput.movement);
+                    var playerRotation = Quaternion.Euler(0, baseEntity.viewAngles.y, 0);
+
+                    _drone.currentInput.movement = playerRotation * worldDirection;
+                }
             }
 
             private void OnDestroy()
