@@ -12,7 +12,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.2.0")]
+    [Info("Ridable Drones", "WhiteThunder", "1.2.1")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -520,6 +520,9 @@ namespace Oxide.Plugins
 
         private static void SetupSeat(BaseMountable mountable)
         {
+            if (!BaseMountable.MobileMountables.Contains(mountable))
+                BaseMountable.MobileMountables.Add(mountable);
+
             mountable.isMobile = true;
             mountable.EnableSaving(true);
             RemoveProblemComponents(mountable);
