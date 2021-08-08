@@ -93,10 +93,7 @@ namespace Oxide.Plugins
             }
 
             foreach (var player in BasePlayer.activePlayerList)
-            {
                 DroneController.RemoveFromPlayer(player);
-                DismountHelper.RemoveFromPlayer(player);
-            }
 
             _pluginInstance = null;
         }
@@ -123,8 +120,6 @@ namespace Oxide.Plugins
                 BaseMountable pilotSeat, passengerSeat;
                 if (!TryGetSeats(drone, out pilotSeat, out passengerSeat))
                     continue;
-
-                DismountHelper.Mount(player, drone);
 
                 if (!permission.UserHasPermission(player.UserIDString, PermissionSeatPilot))
                     continue;
@@ -242,8 +237,6 @@ namespace Oxide.Plugins
             if (!TryGetSeats(drone, out pilotSeat, out passengerSeat))
                 return;
 
-            DismountHelper.Mount(player, drone);
-
             // The rest of the logic is only for pilots.
             if (!permission.UserHasPermission(player.UserIDString, PermissionSeatPilot))
                 return;
@@ -280,7 +273,6 @@ namespace Oxide.Plugins
                 passengerSeat.SetFlag(BaseEntity.Flags.Busy, false);
             }
 
-            DismountHelper.Dismount(player, drone);
             DroneController.Dismount(player, drone);
         }
 
@@ -835,57 +827,6 @@ namespace Oxide.Plugins
         #endregion
 
         #region DroneController
-
-        private class DismountHelper : EntityComponent<BasePlayer>
-        {
-            public static void Mount(BasePlayer player, Drone drone) =>
-                player.GetOrAddComponent<DismountHelper>().OnMount(drone);
-
-            public static void Dismount(BasePlayer player, Drone drone) =>
-                player.GetComponent<DismountHelper>()?.OnDismount();
-
-            public static void RemoveFromPlayer(BasePlayer player) =>
-                DestroyImmediate(player.GetComponent<DismountHelper>());
-
-            private Drone _drone;
-
-            private void DelayedDestroy() => DestroyImmediate(this);
-
-            private void OnMount(Drone drone)
-            {
-                // If they were swapping seats, cancel destroying this component.
-                CancelInvoke(DelayedDestroy);
-
-                _drone = drone;
-            }
-
-            // Don't destroy the component immediately, in case the player is swapping seats.
-            private void OnDismount() => Invoke(DelayedDestroy, 0);
-
-            private void Update()
-            {
-                var mountable = baseEntity.GetMounted();
-                if (mountable == null)
-                {
-                    OnDismount();
-                    return;
-                }
-
-                var input = baseEntity.serverInput;
-                if (!input.WasJustPressed(BUTTON.JUMP))
-                    return;
-
-                if (mountable.HasValidDismountPosition(baseEntity))
-                    return;
-
-                var droneTransform = _drone.transform;
-                if (Vector3.Dot(Vector3.up, droneTransform.up) > 0.1f)
-                    return;
-
-                // Player failed to dismount, and drone is at a bad angle, flip it upright.
-                droneTransform.rotation = Quaternion.Euler(0, droneTransform.rotation.eulerAngles.y, 0);
-            }
-        }
 
         private class DroneController : EntityComponent<BasePlayer>
         {
