@@ -12,7 +12,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.2.3")]
+    [Info("Ridable Drones", "WhiteThunder", "1.2.4")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -717,18 +717,12 @@ namespace Oxide.Plugins
 
         private class TriggerParentEnclosedIgnoreSelf : TriggerParentEnclosed
         {
-            public BaseEntity _thisEntity;
-
-            private void Awake()
-            {
-                _thisEntity = gameObject.ToBaseEntity();
-            }
-
-            protected override bool ShouldParent(BaseEntity entity)
+            public override bool ShouldParent(BaseEntity entity, bool bypassOtherTriggerCheck = false)
             {
                 // This avoids the drone trying to parent itself when using the Targetable Drones plugin.
                 // Targetable Drones uses a child object with the player layer, which the parent trigger is interested in.
-                if (entity == _thisEntity)
+                // This also avoids other drones being parented which can create some problems such as recursive parenting.
+                if (entity is Drone)
                     return false;
 
                 return base.ShouldParent(entity);
