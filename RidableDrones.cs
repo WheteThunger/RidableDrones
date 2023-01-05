@@ -12,7 +12,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.2.4")]
+    [Info("Ridable Drones", "WhiteThunder", "1.2.5")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -31,7 +31,7 @@ namespace Oxide.Plugins
         private const string PermissionSeatPilot = "ridabledrones.seat.pilot";
 
         private const string PilotSeatPrefab = "assets/prefabs/vehicle/seats/miniheliseat.prefab";
-        private const string PassengerSeatPrefab = "assets/bundled/prefabs/static/chair.invisible.static.prefab";
+        private const string PassengerSeatPrefab = "assets/prefabs/deployable/chair/chair.deployed.prefab";
         private const string VisibleSeatPrefab = "assets/prefabs/vehicle/seats/passengerchair.prefab";
         private const string ChairDeployEffectPrefab = "assets/prefabs/deployable/chair/effects/chair-deploy.prefab";
 
@@ -538,6 +538,9 @@ namespace Oxide.Plugins
 
             // Damage will be processed by the drone.
             passengerSeat.baseProtection = null;
+
+            UnityEngine.Object.DestroyImmediate(passengerSeat.GetComponent<GroundWatch>());
+            UnityEngine.Object.DestroyImmediate(passengerSeat.GetComponent<DestroyOnGroundMissing>());
 
             SeatCollider.AddToDrone(drone);
         }
