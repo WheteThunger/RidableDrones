@@ -1,6 +1,5 @@
 ﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Serialization;
 using Oxide.Core;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
@@ -19,10 +18,10 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        Plugin DroneScaleManager, DroneSettings, EntityScaleManager;
+        private readonly Plugin DroneScaleManager, DroneSettings, EntityScaleManager;
 
-        private static RidableDrones _pluginInstance;
-        private Configuration _pluginConfig;
+        private static RidableDrones _instance;
+        private Configuration _config;
 
         private const string PermissionRidable = "ridabledrones.ridable";
         private const string PermissionSeatDeploy = "ridabledrones.seat.deploy";
@@ -39,7 +38,7 @@ namespace Oxide.Plugins
 
         private const BaseEntity.Slot SeatSlot = BaseEntity.Slot.UpperModifier;
 
-        private static readonly Vector3 PassenterSeatLocalPosition = new Vector3(0, 0.081f, 0);
+        private static readonly Vector3 PassengerSeatLocalPosition = new Vector3(0, 0.081f, 0);
         private static readonly Vector3 PilotSeatLocalPosition = new Vector3(-0.006f, 0.027f, 0.526f);
 
         // Subscribe to these hooks while there are drones with parent triggers.
@@ -65,7 +64,7 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            _pluginInstance = this;
+            _instance = this;
 
             permission.RegisterPermission(PermissionRidable, this);
             permission.RegisterPermission(PermissionSeatDeploy, this);
@@ -93,9 +92,11 @@ namespace Oxide.Plugins
             }
 
             foreach (var player in BasePlayer.activePlayerList)
+            {
                 DroneController.RemoveFromPlayer(player);
+            }
 
-            _pluginInstance = null;
+            _instance = null;
         }
 
         private void OnServerInitialized()
@@ -167,15 +168,17 @@ namespace Oxide.Plugins
             if (player == null)
                 return;
 
+            var drone2 = drone;
+
             NextTick(() =>
             {
                 // Delay this check to allow time for other plugins to deploy an entity to this slot.
-                if (drone == null || player == null || HasIncompabitleAttachment(drone))
+                if (drone2 == null || player == null || HasIncompabitleAttachment(drone2))
                     return;
 
                 if (permission.UserHasPermission(player.UserIDString, PermissionSeatDeploy)
                     && !permission.UserHasPermission(player.UserIDString, PermissionSeatAutoDeploy)
-                    && UnityEngine.Random.Range(0, 100) < _pluginConfig.TipChance)
+                    && UnityEngine.Random.Range(0, 100) < _config.TipChance)
                 {
                     ChatMessage(player, Lang.TipDeployCommand);
                 }
@@ -406,32 +409,32 @@ namespace Oxide.Plugins
 
         private static bool CreateParentTriggerWasBlocked(Drone drone)
         {
-            object hookResult = Interface.CallHook("OnDroneParentTriggerCreate", drone);
+            var hookResult = Interface.CallHook("OnDroneParentTriggerCreate", drone);
             return hookResult is bool && (bool)hookResult == false;
         }
 
         private static bool DeploySeatWasBlocked(Drone drone, BasePlayer deployer)
         {
-            object hookResult = Interface.CallHook("OnDroneSeatDeploy", drone, deployer);
+            var hookResult = Interface.CallHook("OnDroneSeatDeploy", drone, deployer);
             return hookResult is bool && (bool)hookResult == false;
         }
 
-        private void RefreshDronSettingsProfile(Drone drone)
+        private void RefreshDroneSettingsProfile(Drone drone)
         {
             DroneSettings?.Call("API_RefreshDroneProfile", drone);
         }
 
         private static float GetDroneScale(Drone drone)
         {
-            if (_pluginInstance.EntityScaleManager == null)
+            if (_instance.EntityScaleManager == null)
                 return 1;
 
-            return Convert.ToSingle(_pluginInstance.EntityScaleManager.Call("API_GetScale", drone));
+            return Convert.ToSingle(_instance.EntityScaleManager.Call("API_GetScale", drone));
         }
 
         private static BaseEntity GetRootEntity(Drone drone)
         {
-            return _pluginInstance.DroneScaleManager?.Call("API_GetRootEntity", drone) as BaseEntity;
+            return _instance.DroneScaleManager?.Call("API_GetRootEntity", drone) as BaseEntity;
         }
 
         private static BaseEntity GetDroneOrRootEntity(Drone drone)
@@ -515,13 +518,17 @@ namespace Oxide.Plugins
         private static void RemoveProblemComponents(BaseEntity entity)
         {
             foreach (var collider in entity.GetComponentsInChildren<MeshCollider>())
+            {
                 UnityEngine.Object.DestroyImmediate(collider);
+            }
         }
 
         private static void SetupSeat(BaseMountable mountable)
         {
             if (!BaseMountable.FixedUpdateMountables.Contains(mountable))
+            {
                 BaseMountable.FixedUpdateMountables.Add(mountable);
+            }
 
             mountable.isMobile = true;
             mountable.EnableSaving(true);
@@ -604,7 +611,7 @@ namespace Oxide.Plugins
             pilotSeat.Spawn();
 
             // The passenger seat shows the "mount" prompt and allows for unlocking view angles.
-            var passengerSeat = GameManager.server.CreateEntity(PassengerSeatPrefab, PassenterSeatLocalPosition) as BaseMountable;
+            var passengerSeat = GameManager.server.CreateEntity(PassengerSeatPrefab, PassengerSeatLocalPosition) as BaseMountable;
             if (passengerSeat == null)
             {
                 pilotSeat.Kill();
@@ -615,7 +622,7 @@ namespace Oxide.Plugins
             passengerSeat.Spawn();
 
             // This chair is visibile, even as the drone moves, but doesn't show a mount prompt.
-            var visibleSeat = GameManager.server.CreateEntity(VisibleSeatPrefab, PassenterSeatLocalPosition) as BaseMountable;
+            var visibleSeat = GameManager.server.CreateEntity(VisibleSeatPrefab, PassengerSeatLocalPosition) as BaseMountable;
             if (visibleSeat == null)
             {
                 pilotSeat.Kill();
@@ -633,8 +640,8 @@ namespace Oxide.Plugins
 
             Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
             Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
-            _pluginInstance.RefreshDronSettingsProfile(drone);
-            _pluginInstance._mountableDronesTracker.Add(drone.net.ID);
+            _instance.RefreshDroneSettingsProfile(drone);
+            _instance._mountableDronesTracker.Add(drone.net.ID);
 
             return passengerSeat;
         }
@@ -671,7 +678,7 @@ namespace Oxide.Plugins
             }
 
             SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
-            RefreshDronSettingsProfile(drone);
+            RefreshDroneSettingsProfile(drone);
             _mountableDronesTracker.Add(drone.net.ID);
         }
 
@@ -692,25 +699,33 @@ namespace Oxide.Plugins
             public void Add(T item)
             {
                 if (_list.Add(item) && _list.Count == 1)
+                {
                     SubscribeAll();
+                }
             }
 
             public void Remove(T item)
             {
                 if (_list.Remove(item) && _list.Count == 0)
+                {
                     UnsubscribeAll();
+                }
             }
 
             public void SubscribeAll()
             {
                 foreach (var hookName in _hookNames)
-                    _pluginInstance.Subscribe(hookName);
+                {
+                    _instance.Subscribe(hookName);
+                }
             }
 
             public void UnsubscribeAll()
             {
                 foreach (var hookName in _hookNames)
-                    _pluginInstance.Unsubscribe(hookName);
+                {
+                    _instance.Unsubscribe(hookName);
+                }
             }
         }
 
@@ -743,7 +758,7 @@ namespace Oxide.Plugins
             public static void AddToDroneOrRootEntity(Drone drone, float scale)
             {
                 GetDroneOrRootEntity(drone).GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
-                _pluginInstance._ridableDronesTracker.Add(drone.net.ID);
+                _instance._ridableDronesTracker.Add(drone.net.ID);
             }
 
             public static void RemoveFromDrone(Drone drone) =>
@@ -767,14 +782,16 @@ namespace Oxide.Plugins
                 childTransform.localScale = new Vector3(scale, 1, scale);
                 childTransform.localPosition = LocalPosition;
 
-                if (baseEntity != OwnerDrone && _pluginInstance.DroneScaleManager != null)
+                if (baseEntity != OwnerDrone && _instance.DroneScaleManager != null)
                 {
                     // Position the trigger relative to the drone.
                     // This accounts for the root entity being offset from the drone, as well as drone scale.
-                    var result = _pluginInstance.DroneScaleManager.Call("API_ParentTransform", OwnerDrone, childTransform);
+                    var result = _instance.DroneScaleManager.Call("API_ParentTransform", OwnerDrone, childTransform);
                     var success = result is bool && (bool)result;
                     if (!success)
-                        _pluginInstance.LogError($"Unable to position parent trigger relative to resized drone {OwnerDrone.net.ID}.");
+                    {
+                        _instance.LogError($"Unable to position parent trigger relative to resized drone {OwnerDrone.net.ID}.");
+                    }
                 }
 
                 // Move the transform upward so it begins at the drone instead of centering on the drone.
@@ -841,20 +858,24 @@ namespace Oxide.Plugins
                 var alreadyExists = component != null;
 
                 if (!alreadyExists)
+                {
                     component = player.gameObject.AddComponent<DroneController>();
+                }
 
                 component.OnMount(player, drone, isPilotSeat);
 
                 if (!alreadyExists)
+                {
                     Interface.CallHook("OnDroneControlStarted", drone, player);
+                }
 
-                _pluginInstance._mountedDronesTracker.Add(drone.net.ID);
+                _instance._mountedDronesTracker.Add(drone.net.ID);
             }
 
             public static void Dismount(BasePlayer player, Drone drone)
             {
                 player.GetComponent<DroneController>()?.OnDismount();
-                _pluginInstance._mountedDronesTracker.Remove(drone.net.ID);
+                _instance._mountedDronesTracker.Remove(drone.net.ID);
             }
 
             public static void RemoveFromPlayer(BasePlayer player) =>
@@ -916,6 +937,7 @@ namespace Oxide.Plugins
                     {
                         _drone.StopControl(_viewerId);
                     }
+
                     Interface.CallHook("OnDroneControlEnded", _drone, _controller);
                 }
             }
@@ -925,7 +947,7 @@ namespace Oxide.Plugins
 
         #region Configuration
 
-        private class Configuration : SerializableConfiguration
+        private class Configuration : BaseConfiguration
         {
             [JsonProperty("TipChance")]
             public int TipChance = 25;
@@ -935,9 +957,9 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Configuration Boilerplate
+        #region Configuration Helpers
 
-        private class SerializableConfiguration
+        private class BaseConfiguration
         {
             public string ToJson() => JsonConvert.SerializeObject(this);
 
@@ -966,7 +988,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool MaybeUpdateConfig(SerializableConfiguration config)
+        private bool MaybeUpdateConfig(BaseConfiguration config)
         {
             var currentWithDefaults = config.ToDictionary();
             var currentRaw = Config.ToDictionary(x => x.Key, x => x.Value);
@@ -975,7 +997,7 @@ namespace Oxide.Plugins
 
         private bool MaybeUpdateConfigDict(Dictionary<string, object> currentWithDefaults, Dictionary<string, object> currentRaw)
         {
-            bool changed = false;
+            var changed = false;
 
             foreach (var key in currentWithDefaults.Keys)
             {
@@ -1006,20 +1028,20 @@ namespace Oxide.Plugins
             return changed;
         }
 
-        protected override void LoadDefaultConfig() => _pluginConfig = GetDefaultConfig();
+        protected override void LoadDefaultConfig() => _config = GetDefaultConfig();
 
         protected override void LoadConfig()
         {
             base.LoadConfig();
             try
             {
-                _pluginConfig = Config.ReadObject<Configuration>();
-                if (_pluginConfig == null)
+                _config = Config.ReadObject<Configuration>();
+                if (_config == null)
                 {
                     throw new JsonException();
                 }
 
-                if (MaybeUpdateConfig(_pluginConfig))
+                if (MaybeUpdateConfig(_config))
                 {
                     LogWarning("Configuration appears to be outdated; updating and saving");
                     SaveConfig();
@@ -1036,7 +1058,7 @@ namespace Oxide.Plugins
         protected override void SaveConfig()
         {
             Log($"Configuration changes saved to {Name}.json");
-            Config.WriteObject(_pluginConfig, true);
+            Config.WriteObject(_config, true);
         }
 
         #endregion
