@@ -12,7 +12,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.2.5")]
+    [Info("Ridable Drones", "WhiteThunder", "1.2.6")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -815,6 +815,8 @@ namespace Oxide.Plugins
                 var triggerParent = _child.AddComponent<TriggerParentEnclosedIgnoreSelf>();
                 triggerParent.intersectionMode = TriggerParentEnclosed.TriggerMode.PivotPoint;
                 triggerParent.interestLayers = Rust.Layers.Mask.Player_Server;
+
+                OwnerDrone.playerCheckRadius = 0;
             }
 
             private void OnDestroy()
@@ -828,7 +830,7 @@ namespace Oxide.Plugins
 
         #region DroneController
 
-        private class DroneController : EntityComponent<BasePlayer>
+        private class DroneController : FacepunchBehaviour
         {
             public static bool Exists(BasePlayer player) =>
                 player.GetComponent<DroneController>() != null;
@@ -841,7 +843,7 @@ namespace Oxide.Plugins
                 if (!alreadyExists)
                     component = player.gameObject.AddComponent<DroneController>();
 
-                component.OnMount(drone, isPilotSeat);
+                component.OnMount(player, drone, isPilotSeat);
 
                 if (!alreadyExists)
                     Interface.CallHook("OnDroneControlStarted", drone, player);
@@ -859,18 +861,24 @@ namespace Oxide.Plugins
                 DestroyImmediate(player.GetComponent<DroneController>());
 
             private Drone _drone;
+            private BasePlayer _controller;
+            private CameraViewerId _viewerId;
             private bool _isPilotSeat;
 
             private void DelayedDestroy() => DestroyImmediate(this);
 
-            private void OnMount(Drone drone, bool isPilotSeat)
+            private void OnMount(BasePlayer controller, Drone drone, bool isPilotSeat)
             {
                 // If they were swapping seats, cancel destroying this component.
                 CancelInvoke(DelayedDestroy);
 
                 _drone = drone;
+                _controller = controller;
+                _viewerId = new CameraViewerId(controller.userID, 0);
                 _isPilotSeat = isPilotSeat;
-                drone.InitializeControl(baseEntity);
+                drone.InitializeControl(_viewerId);
+
+                drone.playerCheckRadius = 0;
             }
 
             // Don't destroy the component immediately, in case the player is swapping seats.
@@ -885,16 +893,16 @@ namespace Oxide.Plugins
                 }
 
                 // Optimization: Skip if there was no user input this frame.
-                if (baseEntity.lastTickTime < Time.time)
+                if (_controller.lastTickTime < Time.time)
                     return;
 
-                _drone.UserInput(baseEntity.serverInput, baseEntity);
+                _drone.UserInput(_controller.serverInput, _viewerId);
 
                 if (!_isPilotSeat)
                 {
                     // In hybrid mode, move relative to the direction the player is facing, instead of relative to the direction the drone is facing.
                     var worldDirection = _drone.transform.InverseTransformVector(_drone.currentInput.movement);
-                    var playerRotation = Quaternion.Euler(0, baseEntity.viewAngles.y, 0);
+                    var playerRotation = Quaternion.Euler(0, _controller.viewAngles.y, 0);
 
                     _drone.currentInput.movement = playerRotation * worldDirection;
                 }
@@ -904,8 +912,11 @@ namespace Oxide.Plugins
             {
                 if (_drone != null && !_drone.IsDestroyed)
                 {
-                    _drone.StopControl();
-                    Interface.CallHook("OnDroneControlEnded", _drone, baseEntity);
+                    if (_drone.ControllingViewerId.HasValue)
+                    {
+                        _drone.StopControl(_viewerId);
+                    }
+                    Interface.CallHook("OnDroneControlEnded", _drone, _controller);
                 }
             }
         }
