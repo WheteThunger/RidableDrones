@@ -5,6 +5,10 @@
 - Allows players with permission to deploy seats to RC drones
 - Allows players with permission to pilot RC drones while sitting in the seat
 
+## Known issues
+
+Since the March 2023 Rust update, drones now sway in the wind, but attached entities do not sway. This causes undesirable visuals to players observing a drone that is being controlled. There is no known fix at this time.
+
 ## Seating modes
 
 When a player is sitting in a drone seat, they will be in one of three modes:
