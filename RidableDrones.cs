@@ -897,6 +897,12 @@ namespace Oxide.Plugins
                 _controller = controller;
                 _viewerId = new CameraViewerId(controller.userID, 0);
                 _isPilotSeat = isPilotSeat;
+
+                if (isPilotSeat && drone.ControllingViewerId.HasValue)
+                {
+                    drone.StopControl(drone.ControllingViewerId.Value);
+                }
+
                 drone.InitializeControl(_viewerId);
 
                 drone.playerCheckRadius = 0;
