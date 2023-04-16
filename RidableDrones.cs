@@ -20,7 +20,6 @@ namespace Oxide.Plugins
         [PluginReference]
         private readonly Plugin DroneScaleManager, DroneSettings, EntityScaleManager;
 
-        private static RidableDrones _instance;
         private Configuration _config;
 
         private const string PermissionRidable = "ridabledrones.ridable";
@@ -38,25 +37,42 @@ namespace Oxide.Plugins
 
         private const BaseEntity.Slot SeatSlot = BaseEntity.Slot.UpperModifier;
 
+        private readonly object True = true;
+
         private static readonly Vector3 PassengerSeatLocalPosition = new Vector3(0, 0.081f, 0);
         private static readonly Vector3 PilotSeatLocalPosition = new Vector3(-0.006f, 0.027f, 0.526f);
 
         // Subscribe to these hooks while there are drones with parent triggers.
-        private DynamicHookSubscriber<uint> _ridableDronesTracker = new DynamicHookSubscriber<uint>(
-            nameof(OnEntityEnter)
-        );
+        private readonly DynamicHookSubscriber<uint> _ridableDronesTracker;
 
         // Subscribe to these hooks while there are drones with seats on them.
-        private DynamicHookSubscriber<uint> _mountableDronesTracker = new DynamicHookSubscriber<uint>(
-            nameof(OnEntityTakeDamage),
-            nameof(OnEntityMounted),
-            nameof(OnEntityDismounted)
-        );
+        private readonly DynamicHookSubscriber<uint> _mountableDronesTracker;
 
         // Subscribe to these hooks while there are mounted drones.
-        private DynamicHookSubscriber<uint> _mountedDronesTracker = new DynamicHookSubscriber<uint>(
-            nameof(OnServerCommand)
-        );
+        private readonly DynamicHookSubscriber<uint> _mountedDronesTracker;
+
+        public RidableDrones()
+        {
+            // Subscribe to these hooks while there are drones with parent triggers.
+            _ridableDronesTracker = new DynamicHookSubscriber<uint>(
+                this,
+                nameof(OnEntityEnter)
+            );
+
+            // Subscribe to these hooks while there are drones with seats on them.
+            _mountableDronesTracker = new DynamicHookSubscriber<uint>(
+                this,
+                nameof(OnEntityTakeDamage),
+                nameof(OnEntityMounted),
+                nameof(OnEntityDismounted)
+            );
+
+            // Subscribe to these hooks while there are mounted drones.
+            _mountedDronesTracker = new DynamicHookSubscriber<uint>(
+                this,
+                nameof(OnServerCommand)
+            );
+        }
 
         #endregion
 
@@ -64,8 +80,6 @@ namespace Oxide.Plugins
 
         private void Init()
         {
-            _instance = this;
-
             permission.RegisterPermission(PermissionRidable, this);
             permission.RegisterPermission(PermissionSeatDeploy, this);
             permission.RegisterPermission(PermissionSeatDeployFree, this);
@@ -87,7 +101,7 @@ namespace Oxide.Plugins
                 if (drone == null)
                     continue;
 
-                DroneParentTriggerComponent.RemoveFromDrone(drone);
+                DroneParentTriggerComponent.RemoveFromDrone(this, drone);
                 SeatCollider.RemoveFromDrone(drone);
             }
 
@@ -95,8 +109,6 @@ namespace Oxide.Plugins
             {
                 DroneController.RemoveFromPlayer(player);
             }
-
-            _instance = null;
         }
 
         private void OnServerInitialized()
@@ -126,7 +138,7 @@ namespace Oxide.Plugins
                     continue;
 
                 var isPilotSeat = currentSeat == pilotSeat;
-                DroneController.Mount(player, drone, isPilotSeat);
+                DroneController.Mount(this, player, drone, isPilotSeat);
             }
 
             Subscribe(nameof(OnEntitySpawned));
@@ -140,7 +152,7 @@ namespace Oxide.Plugins
             // Delay to give other plugins a moment to cache the drone id so they can block this.
             NextTick(() =>
             {
-                if (drone == null)
+                if (drone == null || drone.IsDestroyed)
                     return;
 
                 MaybeCreateParentTrigger(drone);
@@ -173,7 +185,7 @@ namespace Oxide.Plugins
             NextTick(() =>
             {
                 // Delay this check to allow time for other plugins to deploy an entity to this slot.
-                if (drone2 == null || player == null || HasIncompabitleAttachment(drone2))
+                if (drone2 == null || player == null || HasIncompatibleAttachment(drone2))
                     return;
 
                 if (permission.UserHasPermission(player.UserIDString, PermissionSeatDeploy)
@@ -185,7 +197,7 @@ namespace Oxide.Plugins
             });
         }
 
-        private bool? OnEntityTakeDamage(BaseChair mountable, HitInfo info)
+        private object OnEntityTakeDamage(BaseChair mountable, HitInfo info)
         {
             if (mountable.PrefabName != PassengerSeatPrefab)
                 return null;
@@ -197,7 +209,7 @@ namespace Oxide.Plugins
             drone.Hurt(info);
             HitNotify(drone, info);
 
-            return true;
+            return True;
         }
 
         // Allow swapping between between the seating modes
@@ -257,7 +269,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            DroneController.Mount(player, drone, isPilotSeat);
+            DroneController.Mount(this, player, drone, isPilotSeat);
         }
 
         private void OnEntityDismounted(BaseMountable previousSeat, BasePlayer player)
@@ -276,10 +288,10 @@ namespace Oxide.Plugins
                 passengerSeat.SetFlag(BaseEntity.Flags.Busy, false);
             }
 
-            DroneController.Dismount(player, drone);
+            DroneController.Dismount(this, player, drone);
         }
 
-        private bool? OnEntityEnter(TriggerParentEnclosed triggerParent, BasePlayer player)
+        private object OnEntityEnter(TriggerParentEnclosed triggerParent, BasePlayer player)
         {
             var parentTriggerComponent = triggerParent.GetComponentInParent<DroneParentTriggerComponent>();
             if (parentTriggerComponent == null)
@@ -293,7 +305,7 @@ namespace Oxide.Plugins
             // This helps avoid issues where an upside-down drone flips the camera around.
             // Note: This does not solve problems for players already parented.
             if (Vector3.Dot(Vector3.up, drone.transform.up) < 0.8f)
-                return false;
+                return True;
 
             return null;
         }
@@ -321,7 +333,7 @@ namespace Oxide.Plugins
 
                 // Move parent trigger from drone to root entity.
                 UnityEngine.Object.DestroyImmediate(droneComponent);
-                DroneParentTriggerComponent.AddToRootEntity(drone, rootEntity, scale);
+                DroneParentTriggerComponent.AddToRootEntity(this, drone, rootEntity, scale);
                 return;
             }
 
@@ -335,7 +347,7 @@ namespace Oxide.Plugins
                 // Drone is being resized to default size.
                 // Move parent trigger to drone.
                 UnityEngine.Object.DestroyImmediate(rootComponent);
-                drone.Invoke(() => DroneParentTriggerComponent.AddToDrone(drone, scale), 0);
+                drone.Invoke(() => DroneParentTriggerComponent.AddToDrone(this, drone, scale), 0);
                 return;
             }
 
@@ -379,7 +391,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (HasIncompabitleAttachment(drone))
+            if (HasIncompatibleAttachment(drone))
             {
                 ReplyToPlayer(player, Lang.ErrorIncompatibleAttachment);
                 return;
@@ -419,35 +431,15 @@ namespace Oxide.Plugins
             return hookResult is bool && (bool)hookResult == false;
         }
 
-        private void RefreshDroneSettingsProfile(Drone drone)
+        private static bool IsDroneEligible(Drone drone)
         {
-            DroneSettings?.Call("API_RefreshDroneProfile", drone);
+            return drone.skinID == 0 && !(drone is DeliveryDrone);
         }
 
-        private static float GetDroneScale(Drone drone)
+        private static Drone GetParentDrone(BaseEntity entity)
         {
-            if (_instance.EntityScaleManager == null)
-                return 1;
-
-            return Convert.ToSingle(_instance.EntityScaleManager.Call("API_GetScale", drone));
+            return entity.GetParentEntity() as Drone;
         }
-
-        private static BaseEntity GetRootEntity(Drone drone)
-        {
-            return _instance.DroneScaleManager?.Call("API_GetRootEntity", drone) as BaseEntity;
-        }
-
-        private static BaseEntity GetDroneOrRootEntity(Drone drone)
-        {
-            var rootEntity = GetRootEntity(drone);
-            return rootEntity != null ? rootEntity : drone;
-        }
-
-        private static bool IsDroneEligible(Drone drone) =>
-            !(drone is DeliveryDrone);
-
-        private static Drone GetParentDrone(BaseEntity entity) =>
-            entity.GetParentEntity() as Drone;
 
         private static Drone GetMountedDrone(BasePlayer player, out BaseMountable currentSeat)
         {
@@ -466,8 +458,10 @@ namespace Oxide.Plugins
             return GetMountedDrone(player, out currentSeat);
         }
 
-        private static bool HasIncompabitleAttachment(Drone drone) =>
-            drone.GetSlot(SeatSlot) != null;
+        private static bool HasIncompatibleAttachment(Drone drone)
+        {
+            return drone.GetSlot(SeatSlot) != null;
+        }
 
         private static bool TryGetSeats(Drone drone, out BaseMountable pilotSeat, out BaseMountable passengerSeat, out BaseMountable visibleSeat)
         {
@@ -482,13 +476,19 @@ namespace Oxide.Plugins
                     continue;
 
                 if (mountable.PrefabName == PilotSeatPrefab)
+                {
                     pilotSeat = mountable;
+                }
 
                 if (mountable.PrefabName == PassengerSeatPrefab)
+                {
                     passengerSeat = mountable;
+                }
 
                 if (mountable.PrefabName == VisibleSeatPrefab)
+                {
                     visibleSeat = mountable;
+                }
             }
 
             return pilotSeat != null && passengerSeat != null && visibleSeat != null;
@@ -552,13 +552,140 @@ namespace Oxide.Plugins
             SeatCollider.AddToDrone(drone);
         }
 
+        private static BaseEntity GetLookEntity(BasePlayer basePlayer, float maxDistance = 3)
+        {
+            RaycastHit hit;
+            return Physics.Raycast(basePlayer.eyes.HeadRay(), out hit, maxDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+                ? hit.GetEntity()
+                : null;
+        }
+
+        private static void SwitchToSeat(BasePlayer player, BaseMountable currentSeat, BaseMountable desiredSeat)
+        {
+            currentSeat.DismountPlayer(player, lite: true);
+            desiredSeat.MountPlayer(player);
+        }
+
+        private void RefreshDroneSettingsProfile(Drone drone)
+        {
+            DroneSettings?.Call("API_RefreshDroneProfile", drone);
+        }
+
+        private BaseMountable TryDeploySeats(Drone drone, BasePlayer deployer = null)
+        {
+            if (DeploySeatWasBlocked(drone, deployer))
+                return null;
+
+            // The driver seat is ideal for mouse movement since it locks the player view angles.
+            var pilotSeat = GameManager.server.CreateEntity(PilotSeatPrefab, PilotSeatLocalPosition) as BaseMountable;
+            if (pilotSeat == null)
+                return null;
+
+            pilotSeat.SetParent(drone);
+            pilotSeat.Spawn();
+
+            // The passenger seat shows the "mount" prompt and allows for unlocking view angles.
+            var passengerSeat = GameManager.server.CreateEntity(PassengerSeatPrefab, PassengerSeatLocalPosition) as BaseMountable;
+            if (passengerSeat == null)
+            {
+                pilotSeat.Kill();
+                return null;
+            }
+
+            passengerSeat.SetParent(drone);
+            passengerSeat.Spawn();
+
+            // This chair is visible, even as the drone moves, but doesn't show a mount prompt.
+            var visibleSeat = GameManager.server.CreateEntity(VisibleSeatPrefab, PassengerSeatLocalPosition) as BaseMountable;
+            if (visibleSeat == null)
+            {
+                pilotSeat.Kill();
+                passengerSeat.Kill();
+                return null;
+            }
+
+            visibleSeat.SetParent(drone);
+            visibleSeat.Spawn();
+
+            SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
+
+            // This signals to other plugins not to deploy entities here.
+            drone.SetSlot(SeatSlot, passengerSeat);
+
+            Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
+            Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
+            RefreshDroneSettingsProfile(drone);
+            _mountableDronesTracker.Add(drone.net.ID);
+
+            return passengerSeat;
+        }
+
+        private float GetDroneScale(Drone drone)
+        {
+            if (EntityScaleManager == null)
+                return 1;
+
+            return Convert.ToSingle(EntityScaleManager.Call("API_GetScale", drone));
+        }
+
+        private BaseEntity GetRootEntity(Drone drone)
+        {
+            return DroneScaleManager?.Call("API_GetRootEntity", drone) as BaseEntity;
+        }
+
+        private BaseEntity GetDroneOrRootEntity(Drone drone)
+        {
+            var rootEntity = GetRootEntity(drone);
+            return rootEntity != null ? rootEntity : drone;
+        }
+
+        private void MaybeCreateParentTrigger(Drone drone)
+        {
+            if (drone.OwnerID == 0 || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionRidable))
+                return;
+
+            if (CreateParentTriggerWasBlocked(drone))
+                return;
+
+            DroneParentTriggerComponent.AddToDroneOrRootEntity(this, drone, GetDroneScale(drone));
+            Interface.CallHook("OnDroneParentTriggerCreated", drone);
+        }
+
+        private void MaybeAutoDeploySeat(Drone drone)
+        {
+            if (drone.OwnerID == 0
+                || HasIncompatibleAttachment(drone)
+                || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionSeatAutoDeploy))
+                return;
+
+            TryDeploySeats(drone);
+        }
+
+        private void MaybeAddOrRefreshSeats(Drone drone)
+        {
+            BaseMountable pilotSeat, passengerSeat, visibleSeat;
+            if (!TryGetSeats(drone, out pilotSeat, out passengerSeat, out visibleSeat))
+            {
+                MaybeAutoDeploySeat(drone);
+                return;
+            }
+
+            SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
+            RefreshDroneSettingsProfile(drone);
+            _mountableDronesTracker.Add(drone.net.ID);
+        }
+
         private class SeatCollider : EntityComponent<Drone>
         {
-            public static void AddToDrone(Drone drone) =>
+            public static void AddToDrone(Drone drone)
+            {
                 drone.GetOrAddComponent<SeatCollider>();
+            }
 
-            public static void RemoveFromDrone(Drone drone) =>
+            public static void RemoveFromDrone(Drone drone)
+            {
                 DestroyImmediate(drone.GetComponent<SeatCollider>());
+            }
 
             private const float ColliderHeight = 1.5f;
 
@@ -583,116 +710,19 @@ namespace Oxide.Plugins
             private void OnDestroy() => Destroy(_child);
         }
 
-        private static BaseEntity GetLookEntity(BasePlayer basePlayer, float maxDistance = 3)
-        {
-            RaycastHit hit;
-            return Physics.Raycast(basePlayer.eyes.HeadRay(), out hit, maxDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
-                ? hit.GetEntity()
-                : null;
-        }
-
-        private static void SwitchToSeat(BasePlayer player, BaseMountable currentSeat, BaseMountable desiredSeat)
-        {
-            currentSeat.DismountPlayer(player, lite: true);
-            desiredSeat.MountPlayer(player);
-        }
-
-        private static BaseMountable TryDeploySeats(Drone drone, BasePlayer deployer = null)
-        {
-            if (DeploySeatWasBlocked(drone, deployer))
-                return null;
-
-            // The driver seat is ideal for mouse movement since it locks the player view angles.
-            var pilotSeat = GameManager.server.CreateEntity(PilotSeatPrefab, PilotSeatLocalPosition) as BaseMountable;
-            if (pilotSeat == null)
-                return null;
-
-            pilotSeat.SetParent(drone);
-            pilotSeat.Spawn();
-
-            // The passenger seat shows the "mount" prompt and allows for unlocking view angles.
-            var passengerSeat = GameManager.server.CreateEntity(PassengerSeatPrefab, PassengerSeatLocalPosition) as BaseMountable;
-            if (passengerSeat == null)
-            {
-                pilotSeat.Kill();
-                return null;
-            }
-
-            passengerSeat.SetParent(drone);
-            passengerSeat.Spawn();
-
-            // This chair is visibile, even as the drone moves, but doesn't show a mount prompt.
-            var visibleSeat = GameManager.server.CreateEntity(VisibleSeatPrefab, PassengerSeatLocalPosition) as BaseMountable;
-            if (visibleSeat == null)
-            {
-                pilotSeat.Kill();
-                passengerSeat.Kill();
-                return null;
-            }
-
-            visibleSeat.SetParent(drone);
-            visibleSeat.Spawn();
-
-            SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
-
-            // This signals to other plugins not to deploy entities here.
-            drone.SetSlot(SeatSlot, passengerSeat);
-
-            Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
-            Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
-            _instance.RefreshDroneSettingsProfile(drone);
-            _instance._mountableDronesTracker.Add(drone.net.ID);
-
-            return passengerSeat;
-        }
-
-        private void MaybeCreateParentTrigger(Drone drone)
-        {
-            if (drone.OwnerID == 0 || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionRidable))
-                return;
-
-            if (CreateParentTriggerWasBlocked(drone))
-                return;
-
-            DroneParentTriggerComponent.AddToDroneOrRootEntity(drone, GetDroneScale(drone));
-            Interface.CallHook("OnDroneParentTriggerCreated", drone);
-        }
-
-        private void MaybeAutoDeploySeat(Drone drone)
-        {
-            if (drone.OwnerID == 0
-                || HasIncompabitleAttachment(drone)
-                || !permission.UserHasPermission(drone.OwnerID.ToString(), PermissionSeatAutoDeploy))
-                return;
-
-            TryDeploySeats(drone);
-        }
-
-        private void MaybeAddOrRefreshSeats(Drone drone)
-        {
-            BaseMountable pilotSeat, passengerSeat, visibleSeat;
-            if (!TryGetSeats(drone, out pilotSeat, out passengerSeat, out visibleSeat))
-            {
-                MaybeAutoDeploySeat(drone);
-                return;
-            }
-
-            SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
-            RefreshDroneSettingsProfile(drone);
-            _mountableDronesTracker.Add(drone.net.ID);
-        }
-
         #endregion
 
         #region Dynamic Hook Subscriptions
 
         private class DynamicHookSubscriber<T>
         {
+            private RidableDrones _plugin;
             private HashSet<T> _list = new HashSet<T>();
             private string[] _hookNames;
 
-            public DynamicHookSubscriber(params string[] hookNames)
+            public DynamicHookSubscriber(RidableDrones plugin, params string[] hookNames)
             {
+                _plugin = plugin;
                 _hookNames = hookNames;
             }
 
@@ -716,7 +746,7 @@ namespace Oxide.Plugins
             {
                 foreach (var hookName in _hookNames)
                 {
-                    _instance.Subscribe(hookName);
+                    _plugin.Subscribe(hookName);
                 }
             }
 
@@ -724,7 +754,7 @@ namespace Oxide.Plugins
             {
                 foreach (var hookName in _hookNames)
                 {
-                    _instance.Unsubscribe(hookName);
+                    _plugin.Unsubscribe(hookName);
                 }
             }
         }
@@ -749,20 +779,26 @@ namespace Oxide.Plugins
 
         private class DroneParentTriggerComponent : EntityComponent<BaseEntity>
         {
-            public static void AddToDrone(Drone drone, float scale) =>
-                drone.GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
-
-            public static void AddToRootEntity(Drone drone, BaseEntity rootEntity, float scale) =>
-                rootEntity.GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
-
-            public static void AddToDroneOrRootEntity(Drone drone, float scale)
+            public static void AddToDrone(RidableDrones plugin, Drone drone, float scale)
             {
-                GetDroneOrRootEntity(drone).GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(drone, scale);
-                _instance._ridableDronesTracker.Add(drone.net.ID);
+                drone.GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(plugin, drone, scale);
             }
 
-            public static void RemoveFromDrone(Drone drone) =>
-                DestroyImmediate(GetDroneOrRootEntity(drone).GetComponent<DroneParentTriggerComponent>());
+            public static void AddToRootEntity(RidableDrones plugin, Drone drone, BaseEntity rootEntity, float scale)
+            {
+                rootEntity.GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(plugin, drone, scale);
+            }
+
+            public static void AddToDroneOrRootEntity(RidableDrones plugin, Drone drone, float scale)
+            {
+                plugin.GetDroneOrRootEntity(drone).GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(plugin, drone, scale);
+                plugin._ridableDronesTracker.Add(drone.net.ID);
+            }
+
+            public static void RemoveFromDrone(RidableDrones plugin, Drone drone)
+            {
+                DestroyImmediate(plugin.GetDroneOrRootEntity(drone).GetComponent<DroneParentTriggerComponent>());
+            }
 
             // Scalable vertical offset from the drone where the trigger should be created.
             private static readonly Vector3 LocalPosition = new Vector3(0, 0.05f, 0);
@@ -773,6 +809,7 @@ namespace Oxide.Plugins
 
             public Drone OwnerDrone { get; private set; }
 
+            private RidableDrones _plugin;
             private GameObject _child;
             private BoxCollider _triggerCollider;
 
@@ -782,15 +819,15 @@ namespace Oxide.Plugins
                 childTransform.localScale = new Vector3(scale, 1, scale);
                 childTransform.localPosition = LocalPosition;
 
-                if (baseEntity != OwnerDrone && _instance.DroneScaleManager != null)
+                if (baseEntity != OwnerDrone && _plugin.DroneScaleManager != null)
                 {
                     // Position the trigger relative to the drone.
                     // This accounts for the root entity being offset from the drone, as well as drone scale.
-                    var result = _instance.DroneScaleManager.Call("API_ParentTransform", OwnerDrone, childTransform);
+                    var result = _plugin.DroneScaleManager.Call("API_ParentTransform", OwnerDrone, childTransform);
                     var success = result is bool && (bool)result;
                     if (!success)
                     {
-                        _instance.LogError($"Unable to position parent trigger relative to resized drone {OwnerDrone.net.ID}.");
+                        _plugin.LogError($"Unable to position parent trigger relative to resized drone {OwnerDrone.net.ID}.");
                     }
                 }
 
@@ -799,8 +836,9 @@ namespace Oxide.Plugins
                 childTransform.localPosition += new Vector3(0, MinExtents.y / 2, 0);
             }
 
-            private DroneParentTriggerComponent InitForDrone(Drone drone, float scale)
+            private DroneParentTriggerComponent InitForDrone(RidableDrones plugin, Drone drone, float scale)
             {
+                _plugin = plugin;
                 OwnerDrone = drone;
                 EnsureParentTrigger(scale);
                 return this;
@@ -839,7 +877,9 @@ namespace Oxide.Plugins
             private void OnDestroy()
             {
                 if (_child != null)
+                {
                     Destroy(_child);
+                }
             }
         }
 
@@ -849,10 +889,12 @@ namespace Oxide.Plugins
 
         private class DroneController : FacepunchBehaviour
         {
-            public static bool Exists(BasePlayer player) =>
-                player.GetComponent<DroneController>() != null;
+            public static bool Exists(BasePlayer player)
+            {
+                return player.GetComponent<DroneController>() != null;
+            }
 
-            public static void Mount(BasePlayer player, Drone drone, bool isPilotSeat)
+            public static void Mount(RidableDrones plugin, BasePlayer player, Drone drone, bool isPilotSeat)
             {
                 var component = player.GetComponent<DroneController>();
                 var alreadyExists = component != null;
@@ -869,17 +911,19 @@ namespace Oxide.Plugins
                     Interface.CallHook("OnDroneControlStarted", drone, player);
                 }
 
-                _instance._mountedDronesTracker.Add(drone.net.ID);
+                plugin._mountedDronesTracker.Add(drone.net.ID);
             }
 
-            public static void Dismount(BasePlayer player, Drone drone)
+            public static void Dismount(RidableDrones plugin, BasePlayer player, Drone drone)
             {
                 player.GetComponent<DroneController>()?.OnDismount();
-                _instance._mountedDronesTracker.Remove(drone.net.ID);
+                plugin._mountedDronesTracker.Remove(drone.net.ID);
             }
 
-            public static void RemoveFromPlayer(BasePlayer player) =>
+            public static void RemoveFromPlayer(BasePlayer player)
+            {
                 DestroyImmediate(player.GetComponent<DroneController>());
+            }
 
             private Drone _drone;
             private BasePlayer _controller;
@@ -1083,7 +1127,7 @@ namespace Oxide.Plugins
             return args.Length > 0 ? string.Format(message, args) : message;
         }
 
-        private class Lang
+        private static class Lang
         {
             public const string TipDeployCommand = "Tip.DeployCommand";
             public const string ErrorNoPermission = "Error.NoPermission";
