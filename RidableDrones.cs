@@ -70,9 +70,9 @@ namespace Oxide.Plugins
             },
         };
 
-        private readonly ObservableHashSet<uint> _chairDrones = new ObservableHashSet<uint>();
-        private readonly ObservableHashSet<uint> _mountedChairDrones = new ObservableHashSet<uint>();
-        private readonly ObservableHashSet<uint> _signDrones = new ObservableHashSet<uint>();
+        private readonly ObservableHashSet<BaseEntity> _chairDrones = new ObservableHashSet<BaseEntity>();
+        private readonly ObservableHashSet<BaseEntity> _mountedChairDrones = new ObservableHashSet<BaseEntity>();
+        private readonly ObservableHashSet<BaseEntity> _signDrones = new ObservableHashSet<BaseEntity>();
 
         private readonly GatedHookCollection[] _hookCollections;
 
@@ -864,7 +864,7 @@ namespace Oxide.Plugins
             Effect.server.Run(ChairDeployEffectPrefab, passengerChair.transform.position);
             ExposedHooks.OnDroneChairDeployed(drone, deployer);
             RefreshDroneSettingsProfile(drone);
-            _chairDrones.Add(drone.net.ID);
+            _chairDrones.Add(drone);
 
             return passengerChair;
         }
@@ -899,7 +899,7 @@ namespace Oxide.Plugins
 
             SetupAllChairs(drone, pilotChair, passengerChair, visibleChair);
             RefreshDroneSettingsProfile(drone);
-            _chairDrones.Add(drone.net.ID);
+            _chairDrones.Add(drone);
         }
 
         private static bool CanPickupInternal(Drone drone, out string errorLangKey)
@@ -956,7 +956,7 @@ namespace Oxide.Plugins
             {
                 var component = passengerChair.gameObject.AddComponent<ChairComponent>();
                 component._plugin = plugin;
-                component._droneId = drone.net.ID;
+                component._drone = drone;
                 component._chairs = new[] { pilotChair, passengerChair, visibleChair };
                 component.CreateCollider(drone, passengerChair);
             }
@@ -975,7 +975,7 @@ namespace Oxide.Plugins
 
             private RidableDrones _plugin;
             private BaseMountable[] _chairs;
-            private uint _droneId;
+            private BaseEntity _drone;
             private GameObject _child;
             private bool _isUnloading;
 
@@ -1013,8 +1013,8 @@ namespace Oxide.Plugins
                     }
                 }
 
-                _plugin._chairDrones.Remove(_droneId);
-                _plugin._mountedChairDrones.Remove(_droneId);
+                _plugin._chairDrones.Remove(_drone);
+                _plugin._mountedChairDrones.Remove(_drone);
             }
         }
 
@@ -1265,9 +1265,9 @@ namespace Oxide.Plugins
             {
                 var component = sign.gameObject.AddComponent<SignComponent>();
                 component._plugin = plugin;
-                component._droneId = drone.net.ID;
+                component._drone = drone;
                 component.CreateParentTrigger(drone, sign);
-                plugin._signDrones.Add(drone.net.ID);
+                plugin._signDrones.Add(drone);
             }
 
             public static void RemoveFromSign(Signage sign)
@@ -1278,7 +1278,7 @@ namespace Oxide.Plugins
             private const float ColliderHeight = 1.8f;
 
             private RidableDrones _plugin;
-            private uint _droneId;
+            private Drone _drone;
             private GameObject _triggerHost;
 
             private void CreateParentTrigger(Drone drone, Signage sign)
@@ -1310,7 +1310,7 @@ namespace Oxide.Plugins
                     Destroy(_triggerHost);
                 }
 
-                _plugin._signDrones.Remove(_droneId);
+                _plugin._signDrones.Remove(_drone);
             }
         }
 
@@ -1342,13 +1342,13 @@ namespace Oxide.Plugins
                     ExposedHooks.OnDroneControlStarted(drone, player);
                 }
 
-                plugin._mountedChairDrones.Add(drone.net.ID);
+                plugin._mountedChairDrones.Add(drone);
             }
 
             public static void Dismount(RidableDrones plugin, BasePlayer player, Drone drone)
             {
                 player.GetComponent<DroneController>()?.OnDismount();
-                plugin._mountedChairDrones.Remove(drone.net.ID);
+                plugin._mountedChairDrones.Remove(drone);
             }
 
             public static void RemoveFromPlayer(BasePlayer player)
