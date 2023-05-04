@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "1.2.6")]
+    [Info("Ridable Drones", "WhiteThunder", "1.2.7")]
     [Description("Allows players to ride RC drones by standing on them or mounting a chair.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -43,24 +43,24 @@ namespace Oxide.Plugins
         private static readonly Vector3 PilotSeatLocalPosition = new Vector3(-0.006f, 0.027f, 0.526f);
 
         // Subscribe to these hooks while there are drones with parent triggers.
-        private readonly DynamicHookSubscriber<uint> _ridableDronesTracker;
+        private readonly DynamicHookSubscriber<BaseEntity> _ridableDronesTracker;
 
         // Subscribe to these hooks while there are drones with seats on them.
-        private readonly DynamicHookSubscriber<uint> _mountableDronesTracker;
+        private readonly DynamicHookSubscriber<BaseEntity> _mountableDronesTracker;
 
         // Subscribe to these hooks while there are mounted drones.
-        private readonly DynamicHookSubscriber<uint> _mountedDronesTracker;
+        private readonly DynamicHookSubscriber<BaseEntity> _mountedDronesTracker;
 
         public RidableDrones()
         {
             // Subscribe to these hooks while there are drones with parent triggers.
-            _ridableDronesTracker = new DynamicHookSubscriber<uint>(
+            _ridableDronesTracker = new DynamicHookSubscriber<BaseEntity>(
                 this,
                 nameof(OnEntityEnter)
             );
 
             // Subscribe to these hooks while there are drones with seats on them.
-            _mountableDronesTracker = new DynamicHookSubscriber<uint>(
+            _mountableDronesTracker = new DynamicHookSubscriber<BaseEntity>(
                 this,
                 nameof(OnEntityTakeDamage),
                 nameof(OnEntityMounted),
@@ -68,7 +68,7 @@ namespace Oxide.Plugins
             );
 
             // Subscribe to these hooks while there are mounted drones.
-            _mountedDronesTracker = new DynamicHookSubscriber<uint>(
+            _mountedDronesTracker = new DynamicHookSubscriber<BaseEntity>(
                 this,
                 nameof(OnServerCommand)
             );
@@ -162,9 +162,9 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(Drone drone)
         {
-            _ridableDronesTracker.Remove(drone.net.ID);
-            _mountableDronesTracker.Remove(drone.net.ID);
-            _mountedDronesTracker.Remove(drone.net.ID);
+            _ridableDronesTracker.Remove(drone);
+            _mountableDronesTracker.Remove(drone);
+            _mountedDronesTracker.Remove(drone);
         }
 
         private void OnEntityBuilt(Planner planner, GameObject go)
@@ -615,7 +615,7 @@ namespace Oxide.Plugins
             Effect.server.Run(ChairDeployEffectPrefab, passengerSeat.transform.position);
             Interface.CallHook("OnDroneSeatDeployed", drone, deployer);
             RefreshDroneSettingsProfile(drone);
-            _mountableDronesTracker.Add(drone.net.ID);
+            _mountableDronesTracker.Add(drone);
 
             return passengerSeat;
         }
@@ -672,7 +672,7 @@ namespace Oxide.Plugins
 
             SetupAllSeats(drone, pilotSeat, passengerSeat, visibleSeat);
             RefreshDroneSettingsProfile(drone);
-            _mountableDronesTracker.Add(drone.net.ID);
+            _mountableDronesTracker.Add(drone);
         }
 
         private class SeatCollider : EntityComponent<Drone>
@@ -792,7 +792,7 @@ namespace Oxide.Plugins
             public static void AddToDroneOrRootEntity(RidableDrones plugin, Drone drone, float scale)
             {
                 plugin.GetDroneOrRootEntity(drone).GetOrAddComponent<DroneParentTriggerComponent>().InitForDrone(plugin, drone, scale);
-                plugin._ridableDronesTracker.Add(drone.net.ID);
+                plugin._ridableDronesTracker.Add(drone);
             }
 
             public static void RemoveFromDrone(RidableDrones plugin, Drone drone)
@@ -911,13 +911,13 @@ namespace Oxide.Plugins
                     Interface.CallHook("OnDroneControlStarted", drone, player);
                 }
 
-                plugin._mountedDronesTracker.Add(drone.net.ID);
+                plugin._mountedDronesTracker.Add(drone);
             }
 
             public static void Dismount(RidableDrones plugin, BasePlayer player, Drone drone)
             {
                 player.GetComponent<DroneController>()?.OnDismount();
-                plugin._mountedDronesTracker.Remove(drone.net.ID);
+                plugin._mountedDronesTracker.Remove(drone);
             }
 
             public static void RemoveFromPlayer(BasePlayer player)
