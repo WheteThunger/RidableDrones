@@ -502,8 +502,16 @@ namespace Oxide.Plugins
             Drone drone;
             if (!VerifyPlayer(player, out basePlayer)
                 || !VerifyPermission(player, PermissionSignDeploy)
-                || !VerifyDroneFound(player, out drone)
-                || !VerifyDroneHasSlotVacant(player, drone, SignSlots))
+                || !VerifyDroneFound(player, out drone))
+                return;
+
+            if (GetDroneSign(drone) != null)
+            {
+                ReplyToPlayer(player, Lang.ErrorAlreadyHasSign);
+                return;
+            }
+
+            if (!VerifyDroneHasSlotVacant(player, drone, SignSlots))
                 return;
 
             var isFree = player.HasPermission(PermissionSignDeployFree);
@@ -1589,6 +1597,7 @@ namespace Oxide.Plugins
             public const string ErrorNoSignItem = "Error.NoSignItem";
             public const string ErrorNoChairItem = "Error.NoChairItem";
             public const string ErrorAlreadyHasChair = "Error.AlreadyHasChair";
+            public const string ErrorAlreadyHasSign = "Error.AlreadyHasSign";
             public const string ErrorIncompatibleAttachment = "Error.IncompatibleAttachment";
             public const string ErrorDeploySignFailed = "Error.DeploySignFailed";
             public const string ErrorDeployChairFailed = "Error.DeployChairFailed";
@@ -1610,6 +1619,7 @@ namespace Oxide.Plugins
                 [Lang.ErrorNoSignItem] = "Error: You need a small wooden sign to do that.",
                 [Lang.ErrorNoChairItem] = "Error: You need a chair to do that.",
                 [Lang.ErrorAlreadyHasChair] = "Error: That drone already has a chair.",
+                [Lang.ErrorAlreadyHasSign] = "Error: That drone already has a sign.",
                 [Lang.ErrorIncompatibleAttachment] = "Error: That drone has an incompatible attachment.",
                 [Lang.ErrorDeploySignFailed] = "Error: Failed to deploy sign.",
                 [Lang.ErrorDeployChairFailed] = "Error: Failed to deploy chair.",
