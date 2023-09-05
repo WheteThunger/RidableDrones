@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "2.0.0")]
+    [Info("Ridable Drones", "WhiteThunder", "2.0.1")]
     [Description("Allows players to deploy signs and chairs onto RC drones to allow riding them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -515,7 +515,7 @@ namespace Oxide.Plugins
                 return;
 
             var isFree = player.HasPermission(PermissionSignDeployFree);
-            if (!isFree && basePlayer.inventory.FindItemID(SignItemId) == null)
+            if (!isFree && basePlayer.inventory.FindItemByItemID(SignItemId) == null)
             {
                 ReplyToPlayer(player, Lang.ErrorNoSignItem);
                 return;
@@ -552,7 +552,7 @@ namespace Oxide.Plugins
                 return;
 
             var isFree = player.HasPermission(PermissionChairDeployFree);
-            if (!isFree && basePlayer.inventory.FindItemID(ChairItemId) == null)
+            if (!isFree && basePlayer.inventory.FindItemByItemID(ChairItemId) == null)
             {
                 ReplyToPlayer(player, Lang.ErrorNoChairItem);
                 return;
