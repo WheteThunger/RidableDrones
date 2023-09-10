@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "2.0.1")]
+    [Info("Ridable Drones", "WhiteThunder", "2.0.2")]
     [Description("Allows players to deploy signs and chairs onto RC drones to allow riding them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -878,6 +878,12 @@ namespace Oxide.Plugins
 
             UnityEngine.Object.DestroyImmediate(passengerChair.GetComponent<GroundWatch>());
             UnityEngine.Object.DestroyImmediate(passengerChair.GetComponent<DestroyOnGroundMissing>());
+
+            // Box colliders on the deployable chair block dismount from the pilot chair.
+            foreach (var collider in passengerChair.GetComponentsInChildren<BoxCollider>())
+            {
+                UnityEngine.Object.DestroyImmediate(collider);
+            }
 
             ChairComponent.AddToDrone(this, drone, pilotChair, passengerChair, visibleChair);
         }
