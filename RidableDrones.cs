@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "2.0.2")]
+    [Info("Ridable Drones", "WhiteThunder", "2.0.3")]
     [Description("Allows players to deploy signs and chairs onto RC drones to allow riding them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -711,9 +711,9 @@ namespace Oxide.Plugins
 
         private static void SetupChair(BaseMountable mountable)
         {
-            if (!BaseMountable.FixedUpdateMountables.Contains(mountable))
+            if (!BaseMountable.AllMountables.Contains(mountable))
             {
-                BaseMountable.FixedUpdateMountables.Add(mountable);
+                BaseMountable.AllMountables.Add(mountable);
             }
 
             mountable.isMobile = true;
