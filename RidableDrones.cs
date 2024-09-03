@@ -41,19 +41,19 @@ namespace Oxide.Plugins
         private const int SignItemId = -1138208076;
         private const int ChairItemId = 1534542921;
 
-        private static SlotConfig ChairSlots = new SlotConfig(BaseEntity.Slot.UpperModifier);
-        private static SlotConfig SignSlots = new SlotConfig(BaseEntity.Slot.MiddleModifier, BaseEntity.Slot.UpperModifier);
+        private static SlotConfig ChairSlots = new(BaseEntity.Slot.UpperModifier);
+        private static SlotConfig SignSlots = new(BaseEntity.Slot.MiddleModifier, BaseEntity.Slot.UpperModifier);
 
         private readonly object True = true;
         private readonly object False = false;
 
-        private static readonly Vector3 SignLocalPosition = new Vector3(0, 0.114f, 0.265f);
-        private static readonly Vector3 SignLocalRotationAngles = new Vector3(270, 0, 0);
-        private static readonly Vector3 PassengerChairLocalPosition = new Vector3(0, 0.081f, 0);
-        private static readonly Vector3 PilotChairLocalPosition = new Vector3(-0.006f, 0.027f, 0.526f);
+        private static readonly Vector3 SignLocalPosition = new(0, 0.114f, 0.265f);
+        private static readonly Vector3 SignLocalRotationAngles = new(270, 0, 0);
+        private static readonly Vector3 PassengerChairLocalPosition = new(0, 0.081f, 0);
+        private static readonly Vector3 PilotChairLocalPosition = new(-0.006f, 0.027f, 0.526f);
 
-        private readonly Dictionary<string, object> _signRemoveInfo = new Dictionary<string, object>();
-        private readonly Dictionary<string, object> _refundInfo = new Dictionary<string, object>
+        private readonly Dictionary<string, object> _signRemoveInfo = new();
+        private readonly Dictionary<string, object> _refundInfo = new()
         {
             ["sign.wooden.small"] = new Dictionary<string, object>
             {
@@ -61,8 +61,8 @@ namespace Oxide.Plugins
             },
         };
 
-        private readonly Dictionary<string, object> _chairRemoveInfo = new Dictionary<string, object>();
-        private readonly Dictionary<string, object> _chairRefundInfo = new Dictionary<string, object>
+        private readonly Dictionary<string, object> _chairRemoveInfo = new();
+        private readonly Dictionary<string, object> _chairRefundInfo = new()
         {
             ["chair"] = new Dictionary<string, object>
             {
@@ -70,9 +70,9 @@ namespace Oxide.Plugins
             },
         };
 
-        private readonly ObservableHashSet<BaseEntity> _chairDrones = new ObservableHashSet<BaseEntity>();
-        private readonly ObservableHashSet<BaseEntity> _mountedChairDrones = new ObservableHashSet<BaseEntity>();
-        private readonly ObservableHashSet<BaseEntity> _signDrones = new ObservableHashSet<BaseEntity>();
+        private readonly ObservableHashSet<BaseEntity> _chairDrones = new();
+        private readonly ObservableHashSet<BaseEntity> _mountedChairDrones = new();
+        private readonly ObservableHashSet<BaseEntity> _signDrones = new();
 
         private readonly GatedHookCollection[] _hookCollections;
 
@@ -143,13 +143,11 @@ namespace Oxide.Plugins
 
             foreach (var player in BasePlayer.activePlayerList)
             {
-                BaseMountable currentChair;
-                var drone = GetMountedDrone(player, out currentChair);
+                var drone = GetMountedDrone(player, out var currentChair);
                 if (drone == null)
                     continue;
 
-                BaseMountable pilotChair, passengerChair;
-                if (!TryGetChairs(drone, out pilotChair, out passengerChair))
+                if (!TryGetChairs(drone, out var pilotChair, out _))
                     continue;
 
                 if (!permission.UserHasPermission(player.UserIDString, PermissionChairPilot))
@@ -176,8 +174,7 @@ namespace Oxide.Plugins
                     SignComponent.RemoveFromSign(sign);
                 }
 
-                BaseMountable passengerChair;
-                if (TryGetPassengerChair(drone, out passengerChair))
+                if (TryGetPassengerChair(drone, out var passengerChair))
                 {
                     ChairComponent.RemoveFromChair(passengerChair);
                 }
@@ -281,8 +278,7 @@ namespace Oxide.Plugins
             if (player == null)
                 return;
 
-            BaseMountable currentChair;
-            var drone = GetMountedDrone(player, out currentChair);
+            var drone = GetMountedDrone(player, out var currentChair);
             if (drone == null)
                 return;
 
@@ -290,8 +286,7 @@ namespace Oxide.Plugins
             if (!permission.UserHasPermission(player.UserIDString, PermissionChairPilot))
                 return;
 
-            BaseMountable pilotChair, passengerChair;
-            if (!TryGetChairs(drone, out pilotChair, out passengerChair))
+            if (!TryGetChairs(drone, out var pilotChair, out var passengerChair))
                 return;
 
             var desiredChair = currentChair == passengerChair
@@ -307,8 +302,7 @@ namespace Oxide.Plugins
             if (drone == null)
                 return;
 
-            BaseMountable pilotChair, passengerChair;
-            if (!TryGetChairs(drone, out pilotChair, out passengerChair))
+            if (!TryGetChairs(drone, out var pilotChair, out var passengerChair))
                 return;
 
             // The rest of the logic is only for pilots.
@@ -337,8 +331,7 @@ namespace Oxide.Plugins
             if (drone == null)
                 return;
 
-            BaseMountable pilotChair, passengerChair;
-            if (!TryGetChairs(drone, out pilotChair, out passengerChair))
+            if (!TryGetChairs(drone, out var pilotChair, out var passengerChair))
                 return;
 
             if (previousChair == pilotChair)
@@ -362,8 +355,7 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, Drone drone)
         {
-            string errorLangKey;
-            if (CanPickupInternal(drone, out errorLangKey))
+            if (CanPickupInternal(drone, out var errorLangKey))
                 return null;
 
             ChatMessage(player, errorLangKey);
@@ -372,8 +364,7 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, Signage sign)
         {
-            string errorLangKey;
-            if (CanPickupInternal(sign, out errorLangKey))
+            if (CanPickupInternal(sign, out var errorLangKey))
                 return null;
 
             ChatMessage(player, errorLangKey);
@@ -382,8 +373,7 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, BaseChair chair)
         {
-            string errorLangKey;
-            if (CanPickupInternal(chair, out errorLangKey))
+            if (CanPickupInternal(chair, out var errorLangKey))
                 return null;
 
             ChatMessage(player, errorLangKey);
@@ -433,8 +423,7 @@ namespace Oxide.Plugins
         // This hook is exposed by plugin: Remover Tool (RemoverTool).
         private string canRemove(BasePlayer player, Drone drone)
         {
-            string errorLangKey;
-            if (CanPickupInternal(drone, out errorLangKey))
+            if (CanPickupInternal(drone, out var errorLangKey))
                 return null;
 
             return GetMessage(player.UserIDString, errorLangKey);
@@ -498,11 +487,9 @@ namespace Oxide.Plugins
         [Command("dronesign")]
         private void DroneSignCommand(IPlayer player)
         {
-            BasePlayer basePlayer;
-            Drone drone;
-            if (!VerifyPlayer(player, out basePlayer)
+            if (!VerifyPlayer(player, out var basePlayer)
                 || !VerifyPermission(player, PermissionSignDeploy)
-                || !VerifyDroneFound(player, out drone))
+                || !VerifyDroneFound(player, out var drone))
                 return;
 
             if (GetDroneSign(drone) != null)
@@ -535,11 +522,9 @@ namespace Oxide.Plugins
         [Command("dronechair", "droneseat")]
         private void DroneChairCommand(IPlayer player)
         {
-            BasePlayer basePlayer;
-            Drone drone;
-            if (!VerifyPlayer(player, out basePlayer)
+            if (!VerifyPlayer(player, out var basePlayer)
                 || !VerifyPermission(player, PermissionChairDeploy)
-                || !VerifyDroneFound(player, out drone))
+                || !VerifyDroneFound(player, out var drone))
                 return;
 
             if (HasChair(drone))
@@ -616,7 +601,7 @@ namespace Oxide.Plugins
         {
             public static bool IsRCDrone(Drone drone)
             {
-                return !(drone is DeliveryDrone);
+                return drone is not DeliveryDrone;
             }
         }
 
@@ -643,8 +628,7 @@ namespace Oxide.Plugins
 
         private static Drone GetMountedDrone(BasePlayer player)
         {
-            BaseMountable currentChair;
-            return GetMountedDrone(player, out currentChair);
+            return GetMountedDrone(player, out _);
         }
 
         private static Signage GetDroneSign(Drone drone)
@@ -690,20 +674,17 @@ namespace Oxide.Plugins
 
         private static bool TryGetChairs(Drone drone, out BaseMountable pilotChair, out BaseMountable passengerChair)
         {
-            BaseMountable visibleChair;
-            return TryGetChairs(drone, out pilotChair, out passengerChair, out visibleChair);
+            return TryGetChairs(drone, out pilotChair, out passengerChair, out _);
         }
 
         private static bool TryGetPassengerChair(Drone drone, out BaseMountable passengerChair)
         {
-            BaseMountable pilotChair, visibleChair;
-            return TryGetChairs(drone, out pilotChair, out passengerChair, out visibleChair);
+            return TryGetChairs(drone, out _, out passengerChair, out _);
         }
 
         private static bool HasChair(Drone drone)
         {
-            BaseMountable passengerChair;
-            return TryGetPassengerChair(drone, out passengerChair);
+            return TryGetPassengerChair(drone, out _);
         }
 
         private static bool IsDroneChair(BaseChair chair)
@@ -742,8 +723,7 @@ namespace Oxide.Plugins
 
         private static BaseEntity GetLookEntity(BasePlayer basePlayer, float maxDistance = 3)
         {
-            RaycastHit hit;
-            return Physics.Raycast(basePlayer.eyes.HeadRay(), out hit, maxDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+            return Physics.Raycast(basePlayer.eyes.HeadRay(), out var hit, maxDistance, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
                 ? hit.GetEntity()
                 : null;
         }
@@ -781,8 +761,7 @@ namespace Oxide.Plugins
             }
 
             // Prevent drone pickup while there is a chair attached that can be picked up.
-            BaseMountable passengerChair;
-            if (TryGetPassengerChair(drone, out passengerChair))
+            if (TryGetPassengerChair(drone, out var passengerChair))
             {
                 errorLangKey = Lang.ErrorCannotPickupWithChair;
                 return !passengerChair.pickup.enabled;
@@ -833,8 +812,7 @@ namespace Oxide.Plugins
 
         private Signage TryDeploySign(Drone drone, BasePlayer deployer = null, bool allowRefund = false)
         {
-            var hookResult = ExposedHooks.OnDroneSignDeploy(drone, deployer);
-            if (hookResult is bool && (bool)hookResult == false)
+            if (ExposedHooks.OnDroneSignDeploy(drone, deployer) is false)
                 return null;
 
             var sign = GameManager.server.CreateEntity(SmallWoodenSignPrefab, SignLocalPosition, Quaternion.Euler(SignLocalRotationAngles)) as Signage;
@@ -891,7 +869,7 @@ namespace Oxide.Plugins
         private BaseMountable TryDeployChairs(Drone drone, BasePlayer deployer = null, bool allowRefund = false)
         {
             var hookResult = ExposedHooks.OnDroneChairDeploy(drone, deployer);
-            if (hookResult is bool && (bool)hookResult == false)
+            if (hookResult is false)
                 return null;
 
             // The driver chair is ideal for mouse movement since it locks the player view angles.
@@ -966,8 +944,7 @@ namespace Oxide.Plugins
 
         private void MaybeAddOrRefreshChairs(Drone drone)
         {
-            BaseMountable pilotChair, passengerChair, visibleChair;
-            if (!TryGetChairs(drone, out pilotChair, out passengerChair, out visibleChair))
+            if (!TryGetChairs(drone, out var pilotChair, out var passengerChair, out var visibleChair))
             {
                 MaybeAutoDeployChair(drone);
                 return;
@@ -1468,7 +1445,7 @@ namespace Oxide.Plugins
             private int DeprecatedTipChance { set { ChairTipChance = SignTipChance = value; } }
         }
 
-        private Configuration GetDefaultConfig() => new Configuration();
+        private Configuration GetDefaultConfig() => new();
 
         #endregion
 
@@ -1516,8 +1493,7 @@ namespace Oxide.Plugins
 
             foreach (var key in currentWithDefaults.Keys)
             {
-                object currentRawValue;
-                if (currentRaw.TryGetValue(key, out currentRawValue))
+                if (currentRaw.TryGetValue(key, out var currentRawValue))
                 {
                     var defaultDictValue = currentWithDefaults[key] as Dictionary<string, object>;
                     var currentDictValue = currentRawValue as Dictionary<string, object>;
@@ -1580,11 +1556,15 @@ namespace Oxide.Plugins
 
         #region Localization
 
-        private void ReplyToPlayer(IPlayer player, string messageName, params object[] args) =>
+        private void ReplyToPlayer(IPlayer player, string messageName, params object[] args)
+        {
             player.Reply(string.Format(GetMessage(player.Id, messageName), args));
+        }
 
-        private void ChatMessage(BasePlayer player, string messageName, params object[] args) =>
+        private void ChatMessage(BasePlayer player, string messageName, params object[] args)
+        {
             player.ChatMessage(string.Format(GetMessage(player.UserIDString, messageName), args));
+        }
 
         private string GetMessage(string playerId, string messageName, params object[] args)
         {
