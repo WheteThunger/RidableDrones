@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "2.0.3")]
+    [Info("Ridable Drones", "WhiteThunder", "2.1.0")]
     [Description("Allows players to deploy signs and chairs onto RC drones to allow riding them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -34,8 +34,9 @@ namespace Oxide.Plugins
         private const string DeploySignEffectPrefab = "assets/prefabs/deployable/signs/effects/wood-sign-deploy.prefab";
 
         private const string PilotChairPrefab = "assets/prefabs/vehicle/seats/miniheliseat.prefab";
-        private const string PassengerChairPrefab = "assets/prefabs/deployable/chair/chair.deployed.prefab";
-        private const string VisibleChairPrefab = "assets/prefabs/vehicle/seats/passengerchair.prefab";
+        private const string PassengerChairPrefab = "assets/prefabs/deployable/secretlab chair/secretlabchair.deployed.prefab";
+        private const string DeprecatedPassengerChairPrefab = "assets/prefabs/deployable/chair/chair.deployed.prefab";
+        private const string DeprecatedVisibleChairPrefab = "assets/prefabs/vehicle/seats/passengerchair.prefab";
         private const string ChairDeployEffectPrefab = "assets/prefabs/deployable/chair/effects/chair-deploy.prefab";
 
         private const int SignItemId = -1138208076;
@@ -50,7 +51,7 @@ namespace Oxide.Plugins
         private static readonly Vector3 SignLocalPosition = new(0, 0.114f, 0.265f);
         private static readonly Vector3 SignLocalRotationAngles = new(270, 0, 0);
         private static readonly Vector3 PassengerChairLocalPosition = new(0, 0.081f, 0);
-        private static readonly Vector3 PilotChairLocalPosition = new(-0.006f, 0.027f, 0.526f);
+        private static readonly Vector3 PilotChairLocalPosition = new(-0.0045f, 0.0845f, 0.41f);
 
         private readonly Dictionary<string, object> _signRemoveInfo = new();
         private readonly Dictionary<string, object> _refundInfo = new()
@@ -131,9 +132,8 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            foreach (var entity in BaseNetworkable.serverEntities)
+            foreach (var drone in BaseNetworkable.serverEntities.OfType<Drone>().ToList())
             {
-                var drone = entity as Drone;
                 if (drone == null || !IsDroneEligible(drone))
                     continue;
 
@@ -268,7 +268,7 @@ namespace Oxide.Plugins
             return True;
         }
 
-        // Allow swapping between between the seating modes
+        // Allow swapping between the seating modes
         private void OnServerCommand(ConsoleSystem.Arg arg)
         {
             if (arg.Connection == null || arg.cmd.FullName != "vehicle.swapseats")
@@ -621,7 +621,7 @@ namespace Oxide.Plugins
             if (currentChair == null)
                 return null;
 
-            return currentChair.PrefabName == PilotChairPrefab || currentChair.PrefabName == PassengerChairPrefab
+            return currentChair.PrefabName is PilotChairPrefab or PassengerChairPrefab
                 ? GetParentDrone(currentChair)
                 : null;
         }
@@ -641,11 +641,10 @@ namespace Oxide.Plugins
             return GetParentDrone(sign) != null;
         }
 
-        private static bool TryGetChairs(Drone drone, out BaseMountable pilotChair, out BaseMountable passengerChair, out BaseMountable visibleChair)
+        private static bool TryGetChairs(Drone drone, out BaseMountable pilotChair, out BaseMountable passengerChair)
         {
             pilotChair = null;
             passengerChair = null;
-            visibleChair = null;
 
             foreach (var child in drone.children)
             {
@@ -653,33 +652,23 @@ namespace Oxide.Plugins
                 if (mountable == null)
                     continue;
 
-                if (mountable.PrefabName == PilotChairPrefab)
+                switch (mountable.PrefabName)
                 {
-                    pilotChair = mountable;
-                }
-
-                if (mountable.PrefabName == PassengerChairPrefab)
-                {
-                    passengerChair = mountable;
-                }
-
-                if (mountable.PrefabName == VisibleChairPrefab)
-                {
-                    visibleChair = mountable;
+                    case PilotChairPrefab:
+                        pilotChair = mountable;
+                        break;
+                    case PassengerChairPrefab:
+                        passengerChair = mountable;
+                        break;
                 }
             }
 
-            return pilotChair != null && passengerChair != null && visibleChair != null;
-        }
-
-        private static bool TryGetChairs(Drone drone, out BaseMountable pilotChair, out BaseMountable passengerChair)
-        {
-            return TryGetChairs(drone, out pilotChair, out passengerChair, out _);
+            return pilotChair != null && passengerChair != null;
         }
 
         private static bool TryGetPassengerChair(Drone drone, out BaseMountable passengerChair)
         {
-            return TryGetChairs(drone, out _, out passengerChair, out _);
+            return TryGetChairs(drone, out _, out passengerChair);
         }
 
         private static bool HasChair(Drone drone)
@@ -843,11 +832,10 @@ namespace Oxide.Plugins
             return sign;
         }
 
-        private void SetupAllChairs(Drone drone, BaseMountable pilotChair, BaseMountable passengerChair, BaseMountable visibleChair)
+        private void SetupAllChairs(Drone drone, BaseMountable pilotChair, BaseMountable passengerChair)
         {
             SetupChair(pilotChair);
             SetupChair(passengerChair);
-            SetupChair(visibleChair);
 
             pilotChair.dismountPositions = passengerChair.dismountPositions;
 
@@ -863,7 +851,29 @@ namespace Oxide.Plugins
                 UnityEngine.Object.DestroyImmediate(collider);
             }
 
-            ChairComponent.AddToDrone(this, drone, pilotChair, passengerChair, visibleChair);
+            ChairComponent.AddToDrone(this, drone, pilotChair, passengerChair);
+        }
+
+        private BaseMountable SpawnPassengerChair(Drone drone, BasePlayer deployer = null, bool allowRefund = false)
+        {
+            var passengerChair = GameManager.server.CreateEntity(PassengerChairPrefab, PassengerChairLocalPosition) as BaseMountable;
+            if (passengerChair == null)
+                return null;
+
+            passengerChair.pickup.enabled = allowRefund;
+
+            if (deployer != null)
+            {
+                passengerChair.OwnerID = deployer.userID;
+            }
+
+            passengerChair.SetParent(drone);
+            passengerChair.Spawn();
+
+            // Claim slots to prevent deploying incompatible attachments.
+            ChairSlots.OccupyHost(drone, passengerChair);
+
+            return passengerChair;
         }
 
         private BaseMountable TryDeployChairs(Drone drone, BasePlayer deployer = null, bool allowRefund = false)
@@ -881,39 +891,14 @@ namespace Oxide.Plugins
             pilotChair.Spawn();
 
             // The passenger chair shows the "mount" prompt and allows for unlocking view angles.
-            var passengerChair = GameManager.server.CreateEntity(PassengerChairPrefab, PassengerChairLocalPosition) as BaseMountable;
+            var passengerChair = SpawnPassengerChair(drone, deployer, allowRefund);
             if (passengerChair == null)
             {
                 pilotChair.Kill();
                 return null;
             }
 
-            passengerChair.pickup.enabled = allowRefund;
-
-            if (deployer != null)
-            {
-                passengerChair.OwnerID = deployer.userID;
-            }
-
-            passengerChair.SetParent(drone);
-            passengerChair.Spawn();
-
-            // This chair is visible, even as the drone moves, but doesn't show a mount prompt.
-            var visibleChair = GameManager.server.CreateEntity(VisibleChairPrefab, PassengerChairLocalPosition) as BaseMountable;
-            if (visibleChair == null)
-            {
-                pilotChair.Kill();
-                passengerChair.Kill();
-                return null;
-            }
-
-            visibleChair.SetParent(drone);
-            visibleChair.Spawn();
-
-            SetupAllChairs(drone, pilotChair, passengerChair, visibleChair);
-
-            // Claim slots to prevent deploying incompatible attachments.
-            ChairSlots.OccupyHost(drone, passengerChair);
+            SetupAllChairs(drone, pilotChair, passengerChair);
 
             Effect.server.Run(ChairDeployEffectPrefab, passengerChair.transform.position);
             ExposedHooks.OnDroneChairDeployed(drone, deployer);
@@ -942,27 +927,90 @@ namespace Oxide.Plugins
             TryDeployChairs(drone);
         }
 
+        private void ReplaceOldChairs(Drone drone)
+        {
+            BaseMountable pilotChair = null;
+            BaseMountable passengerChair = null;
+            BaseMountable oldPassengerChair = null;
+            BaseMountable oldVisibleChair = null;
+
+            foreach (var child in drone.children)
+            {
+                var mountable = child as BaseMountable;
+                if (mountable == null)
+                    continue;
+
+                switch (mountable.PrefabName)
+                {
+                    case PilotChairPrefab:
+                        pilotChair = mountable;
+                        break;
+                    case PassengerChairPrefab:
+                        passengerChair = mountable;
+                        break;
+                    case DeprecatedPassengerChairPrefab:
+                        oldPassengerChair = mountable;
+                        break;
+                    case DeprecatedVisibleChairPrefab:
+                        oldVisibleChair = mountable;
+                        break;
+                }
+            }
+
+            // Skip if the pilot chair is not present, as that indicates this is not a ridable drone.
+            if (pilotChair is null)
+                return;
+
+            // Skip if the new passenger chair is already present.
+            if (passengerChair is not null)
+                return;
+
+            // Skip if either the old passenger or visible chairs are not present.
+            if (oldPassengerChair == null || oldVisibleChair == null)
+                return;
+
+            var mountedPlayer = oldPassengerChair.GetMounted();
+            if (mountedPlayer != null)
+            {
+                mountedPlayer.EnsureDismounted();
+            }
+
+            passengerChair = SpawnPassengerChair(drone);
+            passengerChair.OwnerID = oldPassengerChair.OwnerID;
+            passengerChair.pickup.enabled = oldPassengerChair.pickup.enabled;
+
+            oldPassengerChair.Kill();
+            oldVisibleChair.Kill();
+
+            if (mountedPlayer is not null)
+            {
+                passengerChair.AttemptMount(mountedPlayer, doMountChecks: false);
+            }
+        }
+
         private void MaybeAddOrRefreshChairs(Drone drone)
         {
-            if (!TryGetChairs(drone, out var pilotChair, out var passengerChair, out var visibleChair))
+            ReplaceOldChairs(drone);
+
+            if (!TryGetChairs(drone, out var pilotChair, out var passengerChair))
             {
                 MaybeAutoDeployChair(drone);
                 return;
             }
 
-            SetupAllChairs(drone, pilotChair, passengerChair, visibleChair);
+            SetupAllChairs(drone, pilotChair, passengerChair);
             RefreshDroneSettingsProfile(drone);
             _chairDrones.Add(drone);
         }
 
         private class ChairComponent : FacepunchBehaviour
         {
-            public static void AddToDrone(RidableDrones plugin, Drone drone, BaseMountable pilotChair, BaseMountable passengerChair, BaseMountable visibleChair)
+            public static void AddToDrone(RidableDrones plugin, Drone drone, BaseMountable pilotChair, BaseMountable passengerChair)
             {
                 var component = passengerChair.gameObject.AddComponent<ChairComponent>();
                 component._plugin = plugin;
                 component._drone = drone;
-                component._chairs = new[] { pilotChair, passengerChair, visibleChair };
+                component._chairs = new[] { pilotChair, passengerChair };
                 component.CreateCollider(drone, passengerChair);
             }
 
@@ -1378,7 +1426,7 @@ namespace Oxide.Plugins
                 _viewerId = new CameraViewerId(controller.userID, 0);
                 _isPilotChair = isPilotChair;
 
-                if (isPilotChair && drone.ControllingViewerId.HasValue)
+                if (drone.ControllingViewerId.HasValue)
                 {
                     drone.StopControl(drone.ControllingViewerId.Value);
                 }
