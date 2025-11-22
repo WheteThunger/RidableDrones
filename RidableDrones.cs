@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "2.1.0")]
+    [Info("Ridable Drones", "WhiteThunder", "2.1.1")]
     [Description("Allows players to deploy signs and chairs onto RC drones to allow riding them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -251,8 +251,6 @@ namespace Oxide.Plugins
                 return null;
 
             drone.Hurt(info);
-            HitNotify(drone, info);
-
             return True;
         }
 
@@ -263,8 +261,6 @@ namespace Oxide.Plugins
                 return null;
 
             drone.Hurt(info);
-            HitNotify(drone, info);
-
             return True;
         }
 
@@ -679,15 +675,6 @@ namespace Oxide.Plugins
         private static bool IsDroneChair(BaseChair chair)
         {
             return GetParentDrone(chair) != null;
-        }
-
-        private static void HitNotify(BaseEntity entity, HitInfo info)
-        {
-            var player = info.Initiator as BasePlayer;
-            if (player == null)
-                return;
-
-            entity.ClientRPCPlayer(null, player, "HitNotify");
         }
 
         private static void RemoveProblemComponents(BaseEntity entity)
