@@ -11,7 +11,7 @@ using VLB;
 
 namespace Oxide.Plugins
 {
-    [Info("Ridable Drones", "WhiteThunder", "2.1.1")]
+    [Info("Ridable Drones", "WhiteThunder", "2.1.2")]
     [Description("Allows players to deploy signs and chairs onto RC drones to allow riding them.")]
     internal class RidableDrones : CovalencePlugin
     {
@@ -309,7 +309,8 @@ namespace Oxide.Plugins
             if (isPilotChair)
             {
                 // Since the passenger chair is the mount ingress, prevent it from being mounted while the pilot chair is mounted.
-                passengerChair.SetFlag(BaseEntity.Flags.Busy, true);
+                using var flagsScope = passengerChair.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate_Flags);
+                flagsScope.Set(BaseEntity.Flags.Busy, true);
             }
             else if (!DroneController.Exists(player))
             {
@@ -333,7 +334,8 @@ namespace Oxide.Plugins
             if (previousChair == pilotChair)
             {
                 // Since the passenger chair is the mount ingress, re-enable it when the pilot chair is dismounted.
-                passengerChair.SetFlag(BaseEntity.Flags.Busy, false);
+                using var flagsScope = passengerChair.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate_Flags);
+                flagsScope.Set(BaseEntity.Flags.Busy, false);
             }
 
             DroneController.Dismount(this, player, drone);
